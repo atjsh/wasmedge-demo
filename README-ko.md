@@ -184,8 +184,10 @@ Dockerfile은 다음과 같은 간결한 multi-stage 흐름을 따릅니다.
 - `main` 브랜치로의 모든 push에서 자동 실행
 - 먼저 불변 `sha-<git-sha>` 태그를 발행
 - GHCR 패키지 가시성을 `public`으로 설정
-- SHA 태그 이미지에 대해 인증 없는 pull 검증 수행
+- GHCR에서 SHA 태그 매니페스트에 대한 익명 접근 가능 여부를 검증
 - 검증이 성공한 뒤에만 `latest` 태그를 승격
+
+GitHub 호스팅 Linux 러너에서는 `wasi/wasm` 이미지를 직접 `docker pull` 할 때 `operating system is not supported` 오류가 발생하므로, CI 검증은 런타임 pull 대신 익명 매니페스트 확인 방식으로 수행합니다.
 
 ### 수동 대체 publish 방법
 

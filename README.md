@@ -184,8 +184,10 @@ The repository includes a GitHub Actions workflow at `.github/workflows/publish-
 - Triggered automatically on every push to `main`
 - Publishes an immutable `sha-<git-sha>` tag first
 - Sets the GHCR package visibility to `public`
-- Verifies an unauthenticated pull of the SHA-tagged image
+- Verifies anonymous access to the SHA-tagged manifest from GHCR
 - Promotes `latest` only after verification succeeds
+
+GitHub-hosted Linux runners cannot directly `docker pull` `wasi/wasm` images and report `operating system is not supported`, so the CI check uses anonymous manifest inspection instead of a runtime pull.
 
 ### Manual fallback publish
 
