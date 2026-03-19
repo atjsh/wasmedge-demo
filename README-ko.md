@@ -29,11 +29,32 @@
 - 파일 I/O 탭을 사용하려면 쓰기 가능한 `demo-data/` 디렉토리 필요
 - 외부 HTTP 데모를 위한 네트워크 연결
 
+## 공개된 GHCR 이미지
+
+- `ghcr.io/atjsh/wasmedge-demo:latest`
+- `ghcr.io/atjsh/wasmedge-demo:sha-<git-sha>`
+
 ## 실행 방법
 
-### 옵션 1: Docker Compose
+### 옵션 1: 공개된 GHCR 이미지 실행
 
-로컬에서 가장 간단한 방법입니다. compose 파일이 이미지를 빌드하고, `./demo-data`를 `/data`에 매핑하며, `8080` 포트를 노출합니다.
+로컬 빌드 없이 공개된 이미지를 바로 실행하려면 이 방법을 사용합니다.
+
+```bash
+mkdir -p demo-data
+
+docker run --rm -p 8080:8080 \
+  --runtime=io.containerd.wasmedge.v1 \
+  --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  ghcr.io/atjsh/wasmedge-demo:latest
+```
+
+그다음 `http://localhost:8080`을 엽니다.
+
+### 옵션 2: Docker Compose
+
+저장소에서 이미지를 직접 빌드하게 하려면 이 방법이 가장 간단합니다.
 
 ```bash
 mkdir -p demo-data
@@ -42,7 +63,7 @@ docker compose up --build
 
 그다음 `http://localhost:8080`을 엽니다.
 
-### 옵션 2: Docker Desktop / `docker run`
+### 옵션 3: 로컬 Docker 빌드 / `docker run`
 
 먼저 이미지를 로컬에서 빌드합니다.
 
@@ -66,7 +87,7 @@ docker run --rm -p 8080:8080 \
 
 그다음 `http://localhost:8080`을 엽니다.
 
-### 옵션 3: WasmEdge CLI
+### 옵션 4: WasmEdge CLI
 
 ```bash
 # WasmEdge 설치
@@ -155,10 +176,43 @@ Dockerfile은 다음과 같은 간결한 multi-stage 흐름을 따릅니다.
 3. `wasmedgec`로 AOT 컴파일을 적용합니다.
 4. 최종 `scratch` 이미지에는 런타임, `server.js`, `modules/`만 복사합니다.
 
+## CI/CD 데모
+
+이 저장소에는 `.github/workflows/publish-ghcr.yml` GitHub Actions 워크플로가 포함됩니다.
+
+- `workflow_dispatch`로 수동 실행 가능
+- `main` 브랜치로의 모든 push에서 자동 실행
+- 먼저 불변 `sha-<git-sha>` 태그를 발행
+- GHCR 패키지 가시성을 `public`으로 설정
+- SHA 태그 이미지에 대해 인증 없는 pull 검증 수행
+- 검증이 성공한 뒤에만 `latest` 태그를 승격
+
+### 수동 대체 publish 방법
+
+GitHub Actions 대신 로컬 셸에서 직접 publish하려면 먼저 GitHub CLI 인증에 `write:packages` 스코프를 추가해야 합니다.
+
+```bash
+gh auth refresh -s write:packages
+echo "$(gh auth token)" | docker login ghcr.io -u atjsh --password-stdin
+
+SHA_TAG="sha-$(git rev-parse --short=12 HEAD)"
+
+docker buildx build --platform wasi/wasm \
+  -t "ghcr.io/atjsh/wasmedge-demo:${SHA_TAG}" \
+  --push .
+
+gh api --method PATCH user/packages/container/wasmedge-demo -f visibility=public
+
+docker buildx imagetools create \
+  --tag ghcr.io/atjsh/wasmedge-demo:latest \
+  "ghcr.io/atjsh/wasmedge-demo:${SHA_TAG}"
+```
+
 ## 참고 사항 및 제한
 
 - GUI는 브라우저를 통해 제공되며, 이 프로젝트는 네이티브 OS 창을 생성하지 않습니다.
-- 이 저장소는 로컬 빌드 및 실행 절차를 문서화합니다. 원격 배포가 필요하면 빌드한 OCI 이미지를 Docker Hub 또는 다른 OCI 레지스트리에 푸시하면 됩니다.
+- 이 저장소의 기본 레지스트리 대상은 GHCR입니다: `ghcr.io/atjsh/wasmedge-demo`
+- GHCR에서는 패키지 접근 권한과 공개 가시성이 별도로 관리되므로, 첫 publish 이후 공개 상태를 다시 확인해야 합니다.
 - 외부 HTTPS 동작은 WasmEdge 런타임 환경에 따라 달라질 수 있으며 추가 TLS 지원이 필요할 수 있습니다.
 - `demo-data/`는 수정 가능한 호스트 마운트 저장소이므로 버전 관리에 포함하지 않습니다.
 

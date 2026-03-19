@@ -29,11 +29,32 @@ In practice, the user runs a container and opens `http://localhost:8080`. The br
 - A writable `demo-data/` directory if you want to use the file I/O tab
 - Network access for the outbound HTTP demo
 
+## Published GHCR Image
+
+- `ghcr.io/atjsh/wasmedge-demo:latest`
+- `ghcr.io/atjsh/wasmedge-demo:sha-<git-sha>`
+
 ## Running the Demo
 
-### Option 1: Docker Compose
+### Option 1: Run the published GHCR image
 
-This is the simplest local workflow because the compose file builds the image, maps `./demo-data` to `/data`, and publishes port `8080`.
+Use this when you want to run the published image directly instead of building locally.
+
+```bash
+mkdir -p demo-data
+
+docker run --rm -p 8080:8080 \
+  --runtime=io.containerd.wasmedge.v1 \
+  --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  ghcr.io/atjsh/wasmedge-demo:latest
+```
+
+Then open `http://localhost:8080`.
+
+### Option 2: Docker Compose
+
+This is the simplest local workflow when you want the repository to build the image for you.
 
 ```bash
 mkdir -p demo-data
@@ -42,7 +63,7 @@ docker compose up --build
 
 Then open `http://localhost:8080`.
 
-### Option 2: Docker Desktop / `docker run`
+### Option 3: Local Docker build / `docker run`
 
 Build the image locally first:
 
@@ -66,7 +87,7 @@ docker run --rm -p 8080:8080 \
 
 Then open `http://localhost:8080`.
 
-### Option 3: WasmEdge CLI
+### Option 4: WasmEdge CLI
 
 ```bash
 # Install WasmEdge
@@ -155,10 +176,43 @@ The Dockerfile follows a compact multi-stage flow:
 3. apply AOT compilation with `wasmedgec`
 4. copy only the runtime, `server.js`, and `modules/` into a `scratch` image
 
+## CI/CD Demo
+
+The repository includes a GitHub Actions workflow at `.github/workflows/publish-ghcr.yml`.
+
+- Triggered by `workflow_dispatch`
+- Triggered automatically on every push to `main`
+- Publishes an immutable `sha-<git-sha>` tag first
+- Sets the GHCR package visibility to `public`
+- Verifies an unauthenticated pull of the SHA-tagged image
+- Promotes `latest` only after verification succeeds
+
+### Manual fallback publish
+
+If you want to publish from a local shell instead of GitHub Actions, refresh your GitHub CLI auth first so it includes `write:packages`.
+
+```bash
+gh auth refresh -s write:packages
+echo "$(gh auth token)" | docker login ghcr.io -u atjsh --password-stdin
+
+SHA_TAG="sha-$(git rev-parse --short=12 HEAD)"
+
+docker buildx build --platform wasi/wasm \
+  -t "ghcr.io/atjsh/wasmedge-demo:${SHA_TAG}" \
+  --push .
+
+gh api --method PATCH user/packages/container/wasmedge-demo -f visibility=public
+
+docker buildx imagetools create \
+  --tag ghcr.io/atjsh/wasmedge-demo:latest \
+  "ghcr.io/atjsh/wasmedge-demo:${SHA_TAG}"
+```
+
 ## Notes and Limitations
 
 - The GUI is delivered through the browser; this project does not create native OS windows.
-- This repository documents local build-and-run workflows. If you want remote distribution, push the resulting OCI image to Docker Hub or another OCI registry after building it.
+- The primary registry target in this repository is GHCR: `ghcr.io/atjsh/wasmedge-demo`.
+- Public GHCR visibility still needs to be verified after the first publish because package access permissions and package visibility are handled separately.
 - Outbound HTTPS behavior depends on the WasmEdge runtime environment and may require additional TLS support.
 - `demo-data/` is intentionally excluded from version control because it is used as mutable host-mounted storage.
 
