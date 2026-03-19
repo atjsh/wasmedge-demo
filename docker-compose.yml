@@ -1,0 +1,12 @@
+services:
+  app:
+    build:
+      context: .
+    image: wasmedge-demo:latest
+    platform: wasi/wasm
+    runtime: io.containerd.wasmedge.v1
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./demo-data:/data
+    restart: unless-stopped
