@@ -2,128 +2,171 @@
 
 # WasmEdge Demo — Codesign-Free GUI Web App
 
-A fully functional web GUI that runs entirely inside a **WasmEdge WASM container**. No native binaries, no code signing, no OS-specific GUI frameworks — just `docker run` and open your browser.
+## Overview
 
-## What Is This?
+This repository contains a reference demo of a browser-based GUI served from inside a WasmEdge WebAssembly container. The application runs on `wasmedge_quickjs.wasm`, exposes an HTTP server from `server.js`, and renders its interface in the browser with inline HTML, CSS, and JavaScript.
 
-This is a **demo/showcase application** proving that a rich web GUI can be:
+The project is meant to demonstrate a "codesign-free" delivery model:
 
-1. **Written in JavaScript** — using WasmEdge's QuickJS runtime (Node.js-compatible)
-2. **Packaged as a ~2MB OCI image** — `FROM scratch`, containing only the WASM runtime + JS app
-3. **Distributed via Docker Hub** — standard `docker pull` / `docker run`
-4. **Run without code signing** — no native binary = no codesign required
-5. **Fully sandboxed** — WASM provides memory safety and capability-based security
+- no native desktop executable
+- no OS-specific GUI toolkit
+- no platform-specific code-signing or notarization flow
+- a standard OCI/WASM runtime launch process
 
-## Quick Start
+In practice, the user runs a container and opens `http://localhost:8080`. The browser becomes the GUI surface, while WasmEdge and WASI provide the runtime and sandbox boundary.
 
-### Option 1: Docker Desktop
+## What the Demo Covers
 
-> **Prerequisites**: Docker Desktop with [Wasm support enabled](https://docs.docker.com/desktop/features/wasm/)
+- A single-file JavaScript HTTP server running on WasmEdge QuickJS
+- A browser UI delivered as regular HTML/CSS/JS instead of a native windowing framework
+- Outbound HTTP requests initiated from inside the WASM container
+- File access through a host-mapped `/data` directory
+- Runtime inspection and request logging endpoints exposed through the web UI
+
+## Runtime Requirements
+
+- Docker Desktop with [Wasm support](https://docs.docker.com/desktop/features/wasm/) enabled, or a local WasmEdge CLI installation
+- A writable `demo-data/` directory if you want to use the file I/O tab
+- Network access for the outbound HTTP demo
+
+## Running the Demo
+
+### Option 1: Docker Compose
+
+This is the simplest local workflow because the compose file builds the image, maps `./demo-data` to `/data`, and publishes port `8080`.
 
 ```bash
-# Create a directory for the file I/O demo
+mkdir -p demo-data
+docker compose up --build
+```
+
+Then open `http://localhost:8080`.
+
+### Option 2: Docker Desktop / `docker run`
+
+Build the image locally first:
+
+```bash
+docker buildx build --platform wasi/wasm -t wasmedge-demo:latest .
+```
+
+If your `buildx` driver does not automatically load images into the local Docker image store, add `--load`.
+
+Run the container:
+
+```bash
 mkdir -p demo-data
 
-# Run the container
-docker run -dp 8080:8080 \
-  --rm \
+docker run --rm -p 8080:8080 \
   --runtime=io.containerd.wasmedge.v1 \
   --platform=wasi/wasm \
-  -v $(pwd)/demo-data:/data \
+  -v "$(pwd)/demo-data:/data" \
   wasmedge-demo:latest
 ```
 
-Open **http://localhost:8080** in your browser.
+Then open `http://localhost:8080`.
 
-### Option 2: Docker Compose
-
-```bash
-mkdir -p demo-data
-docker compose up
-```
-
-### Option 3: WasmEdge CLI (Development)
+### Option 3: WasmEdge CLI
 
 ```bash
 # Install WasmEdge
 curl -sSf https://raw.githubusercontent.com/WasmEdge/WasmEdge/master/utils/install.sh | bash
-source $HOME/.wasmedge/env
+source "$HOME/.wasmedge/env"
 
-# Download the QuickJS runtime
+# Download the QuickJS runtime and compatibility modules
 curl -OL https://github.com/second-state/wasmedge-quickjs/releases/download/v0.5.0-alpha/wasmedge_quickjs.wasm
 curl -OL https://github.com/second-state/wasmedge-quickjs/releases/download/v0.5.0-alpha/modules.zip
 unzip modules.zip
 
-# Create demo data directory
+# Create the host directory used by the file I/O demo
 mkdir -p demo-data
 
-# Run
+# Run the app
 wasmedge --dir .:. --dir ./demo-data:/data wasmedge_quickjs.wasm server.js
 ```
 
-Open **http://localhost:8080** in your browser.
+Then open `http://localhost:8080`.
 
-## Demo Features
+## Web UI Reference
 
-The web UI has **4 interactive tabs**:
+### Runtime Info
 
-### 🏠 Runtime Info
-- WasmEdge environment details (`os.type()` → "wasmedge", `os.platform()` → "wasi", `os.arch()` → "wasm")
-- Process information (argv, env, uptime)
-- Explains the codesign-free concept
+- Reports runtime details such as `os.type()`, `os.platform()`, and `os.arch()`
+- Shows process data including uptime and selected environment information
+- Explains the purpose of the codesign-free packaging model
 
-### 🌐 HTTP Demo
-- Make outbound HTTP requests from inside the WASM container
-- Supports GET, POST, PUT methods
-- Custom URL input with JSON response viewer
-- Latency measurement for each request
+### HTTP Demo
 
-### 📁 File I/O Demo
-- Browse files in a host-mapped directory (`/data`)
-- Create, read, edit, and delete files from the web UI
-- View file metadata (size, timestamps)
-- Demonstrates WASI directory preopens (`--dir` flag)
+- Sends outbound requests from inside the WASM container
+- Supports GET, POST, and PUT
+- Displays response payloads and simple request timing
 
-### 🔌 Server Info
-- Live request log (all HTTP requests the server has handled)
-- Server uptime and total request count
-- Echo endpoint for testing
+### File I/O Demo
+
+- Lists files in the host-mapped `/data` directory
+- Creates, reads, updates, and deletes files from the browser
+- Shows file metadata and demonstrates the WASI preopen model
+
+### Server Info
+
+- Displays recent request history captured by the server
+- Reports uptime and request counters
+- Includes an echo endpoint for request/response testing
+
+## Filesystem Model
+
+The File I/O tab is intentionally limited to `/data`. When using Docker Compose or `docker run`, `/data` is backed by `./demo-data`. When using the WasmEdge CLI directly, expose the same directory with `--dir ./demo-data:/data`.
+
+The application does not browse arbitrary host paths. Access is limited to the directories explicitly preopened through WASI.
 
 ## Architecture
 
-```
+```text
 Browser (http://localhost:8080)
-    │
-    ▼
-┌─────────────────────────────────┐
-│ WasmEdge Runtime                │
-│  └─ wasmedge_quickjs.wasm       │
-│     └─ server.js (HTTP server)  │
-│        ├── Inline HTML/CSS/JS   │
-│        ├── /api/* endpoints     │
-│        └── modules/ (Node.js)   │
-├─────────────────────────────────┤
-│ WASI Preopens                   │
-│  --dir .:. (internal FS)        │
-│  --dir ./demo-data:/data (host) │
-└─────────────────────────────────┘
+    |
+    v
+server.js
+    |
+    v
+wasmedge_quickjs.wasm
+    |
+    +-- inline HTML/CSS/JS
+    +-- /api/runtime
+    +-- /api/fetch
+    +-- /api/files/*
+    +-- /api/server-info
+    |
+    v
+WASI preopens
+    +-- .             (project files inside the runtime)
+    +-- /data         (host-mapped demo-data directory)
 ```
 
-- **~2MB total image size** (vs 300MB+ for Node.js)
-- **Millisecond startup** (vs seconds for Linux containers)
-- **Cross-platform** — runs on any OS/CPU Docker supports
-
-## Building
+## Building the Image
 
 ```bash
-docker buildx build --platform wasi/wasm -t wasmedge-demo .
+docker buildx build --platform wasi/wasm -t wasmedge-demo:latest .
 ```
 
-## Technology
+The Dockerfile follows a compact multi-stage flow:
 
-- [WasmEdge](https://wasmedge.org/) — CNCF sandbox project, lightweight WASM runtime
-- [WasmEdge QuickJS](https://github.com/second-state/wasmedge-quickjs) — JavaScript engine for WasmEdge
-- [Docker + WASM](https://docs.docker.com/desktop/features/wasm/) — OCI-compliant WASM containers
+1. install WasmEdge in the build stage
+2. download `wasmedge_quickjs.wasm` and `modules.zip`
+3. apply AOT compilation with `wasmedgec`
+4. copy only the runtime, `server.js`, and `modules/` into a `scratch` image
+
+## Notes and Limitations
+
+- The GUI is delivered through the browser; this project does not create native OS windows.
+- This repository documents local build-and-run workflows. If you want remote distribution, push the resulting OCI image to Docker Hub or another OCI registry after building it.
+- Outbound HTTPS behavior depends on the WasmEdge runtime environment and may require additional TLS support.
+- `demo-data/` is intentionally excluded from version control because it is used as mutable host-mounted storage.
+
+## Technology References
+
+- [WasmEdge documentation](https://wasmedge.org/docs/)
+- [WasmEdge QuickJS](https://github.com/second-state/wasmedge-quickjs)
+- [Docker Desktop Wasm support](https://docs.docker.com/desktop/features/wasm/)
 
 ## License
 
