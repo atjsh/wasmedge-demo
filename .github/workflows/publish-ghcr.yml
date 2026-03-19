@@ -129,16 +129,21 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$DOCKER_CONFIG"
+          pull_log="$(mktemp)"
 
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if docker pull --platform wasi/wasm "${IMAGE_NAME}:${SHA_TAG}" >/dev/null 2>&1; then
+          for attempt in $(seq 1 20); do
+            if docker pull --platform wasi/wasm "${IMAGE_NAME}:${SHA_TAG}" >"$pull_log" 2>&1; then
               docker image inspect "${IMAGE_NAME}:${SHA_TAG}" >/dev/null
+              rm -f "$pull_log"
               exit 0
             fi
             echo "Unauthenticated pull attempt ${attempt} failed; retrying..." >&2
-            sleep 10
+            tail -n 5 "$pull_log" >&2 || true
+            sleep 15
           done
 
+          tail -n 20 "$pull_log" >&2 || true
+          rm -f "$pull_log"
           echo "Failed to pull ${IMAGE_NAME}:${SHA_TAG} anonymously." >&2
           exit 1
 
