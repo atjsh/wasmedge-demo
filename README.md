@@ -1,3 +1,5 @@
+**English** | [한국어](README-ko.md)
+
 # WasmEdge Demo — Codesign-Free GUI Web App
 
 A fully functional web GUI that runs entirely inside a **WasmEdge WASM container**. No native binaries, no code signing, no OS-specific GUI frameworks — just `docker run` and open your browser.
