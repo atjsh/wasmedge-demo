@@ -29,6 +29,47 @@ In practice, the user runs a container and opens `http://localhost:8080`. The br
 - A writable `demo-data/` directory if you want to use the file I/O tab
 - Network access for the outbound HTTP demo
 
+## Comparison: WasmEdge vs `npm` / `npx` vs Native Apps
+
+This demo uses WasmEdge because it changes the delivery model, not because it is automatically better than every Node.js or native approach.
+
+The current published WasmEdge artifact for this repository is about `2.0 MiB` when pulled locally, and the application logic itself is a single `31 KiB` `server.js`. That is a real advantage for this particular demo, but it should be compared against the right alternatives and with the right caveats.
+
+| Aspect | WasmEdge / OCI app | Node.js + `npm` / `npx` app | Native OS app |
+| --- | --- | --- | --- |
+| Delivery unit | OCI/WASM image from a registry such as GHCR | Package from the npm registry | Platform-specific binary, archive, or installer |
+| Measured example in this repo | Current published image is about `2.0 MiB`; app payload is a single `31 KiB` `server.js`; final image is `scratch`-based | Not measured in this repo; package payload can be small, but it assumes a preinstalled Node.js runtime | Not measured in this repo; can be a single binary, but usually requires separate assets per OS and architecture |
+| Target prerequisites | Docker Desktop with Wasm support, or a WasmEdge CLI install | A working Node.js + npm environment | Per-platform install or download flow |
+| Version management | OCI tags and digests make pinning and rollback explicit | Semver is familiar, but `npx` still relies on npm resolution behavior unless versions are pinned carefully | Usually handled through release assets, installers, and app-specific update channels |
+| Language story | WasmEdge docs highlight app development in Rust, JavaScript, Go, and Python, plus standard Wasm compiled from languages such as C/C++, Swift, AssemblyScript, and Kotlin | Excellent for JavaScript and TypeScript; other languages usually enter through bindings or external processes | Depends on the chosen native stack, but often becomes more platform-specific over time |
+| Isolation model | Sandboxed runtime with explicit WASI preopens and controlled host access | Runs with normal Node.js process permissions unless separately sandboxed | Usually has the deepest OS access and the broadest integration surface |
+| GUI model | Browser-delivered UI; no native windowing toolkit required | Often CLI-first, browser-based, or Electron-style | Best fit for real native windows, menus, system integrations, and device access |
+
+### Why the WasmEdge route is attractive here
+
+- The published artifact is genuinely small for this repo's current shape: about `2.0 MiB` pulled, with a single-file app payload.
+- OCI registries give you explicit pull, pin, promote, and rollback mechanics by tag or digest instead of relying on informal install instructions.
+- The delivery model is not locked to JavaScript alone. WasmEdge's docs position it as a runtime for Wasm apps developed in multiple languages, which matters if the app boundary grows beyond a JS-only tool.
+- The sandbox and WASI preopen model make the host access story more explicit than "run a process and let it see the machine."
+
+### Where `npm` / `npx` is still better
+
+- If your audience already has Node.js installed, `npx some-tool@version` is often lower-friction than asking them to enable Docker Wasm support or install WasmEdge.
+- The JavaScript tooling ecosystem, package discovery, debugging ergonomics, and developer familiarity are all better in the Node.js path today.
+- If the product is fundamentally just a JS CLI, WasmEdge can add runtime novelty without enough user-facing payoff.
+
+### Where native apps are still better
+
+- A browser-served GUI is not the same thing as a native desktop application. Native apps still win when you need real windows, file pickers, menus, notifications, tray behavior, or deeper device and OS integration.
+- Native distribution can feel more direct to end users when you ship a polished installer, even though the release pipeline is usually heavier.
+- If the product depends on first-class desktop UX or tight platform integration, forcing it into a browser + container model is the wrong trade.
+
+### Critical takeaways
+
+- WasmEdge does not magically remove version-management problems, but OCI registries do give you cleaner and more reproducible deployment units than ad hoc binary sharing or loosely specified install steps.
+- WasmEdge is compelling here because the app is small, browser-based, and easy to describe as a pinned OCI/WASM artifact.
+- That does not mean it replaces `npm` / `npx` for everyday JS tooling, or native apps for serious desktop integration.
+
 ## Published GHCR Image
 
 - `ghcr.io/atjsh/wasmedge-demo:latest`
