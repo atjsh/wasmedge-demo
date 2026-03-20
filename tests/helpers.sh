@@ -59,6 +59,7 @@ stop_gui_server() {
 
 # Start mock Confluence server (background), sets MOCK_PID
 start_mock_server() {
+  cp -f "${REPO_DIR}/tests/mock-server.js" "${REPO_DIR}/tests/mock-server.mjs" 2>/dev/null || true
   node "${REPO_DIR}/tests/mock-server.mjs" &
   MOCK_PID=$!
   sleep 2  # wait for server startup
