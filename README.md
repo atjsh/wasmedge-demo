@@ -146,7 +146,7 @@ unzip modules.zip
 mkdir -p demo-data
 
 # Run the app
-wasmedge --dir .:. --dir ./demo-data:/data wasmedge_quickjs.wasm server.js
+wasmedge --dir .:. --dir /data:./demo-data wasmedge_quickjs.wasm server.js
 ```
 
 Then open `http://localhost:8080`.
@@ -179,7 +179,7 @@ Then open `http://localhost:8080`.
 
 ## Filesystem Model
 
-The File I/O tab is intentionally limited to `/data`. When using Docker Compose or `docker run`, `/data` is backed by `./demo-data`. When using the WasmEdge CLI directly, expose the same directory with `--dir ./demo-data:/data`.
+The File I/O tab is intentionally limited to `/data`. When using Docker Compose or `docker run`, `/data` is backed by `./demo-data`. When using the WasmEdge CLI directly, expose the same directory with `--dir /data:./demo-data`.
 
 The application does not browse arbitrary host paths. Access is limited to the directories explicitly preopened through WASI.
 

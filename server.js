@@ -145,7 +145,7 @@ function dataAvailable() {
 
 function handleFilesList(req, resp) {
   if (!dataAvailable()) {
-    json(resp, 503, { error: 'Host directory not mounted. Run with: --dir /host/path:/data' });
+    json(resp, 503, { error: 'Host directory not mounted. Run with: --dir /data:/host/path' });
     return;
   }
   try {
@@ -471,7 +471,7 @@ function getHtml() {
     <h2>Host Filesystem — <code>/data</code></h2>
     <p style="color:var(--muted);margin-bottom:12px;">
       Read &amp; write files on the host machine via WASI directory preopens.
-      Requires: <code>--dir /host/path:/data</code>
+      Requires: <code>--dir /data:/host/path</code>
     </p>
     <div class="row" style="margin-bottom:12px;">
       <button class="btn" onclick="loadFiles()">&#x21bb; Refresh</button>
@@ -756,7 +756,8 @@ async function doEcho() {
 // ---------------------------------------------------------------------------
 function route(req, resp) {
   const { pathname } = parseUrl(req.url);
-  const method = req.method;
+  // WasmEdge QuickJS may expose lowercase method names.
+  const method = String(req.method || '').toUpperCase();
 
   if (method === 'GET' && (pathname === '/' || pathname === '/index.html')) {
     logRequest(method, pathname, 200);

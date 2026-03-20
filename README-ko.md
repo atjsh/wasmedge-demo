@@ -146,7 +146,7 @@ unzip modules.zip
 mkdir -p demo-data
 
 # 앱 실행
-wasmedge --dir .:. --dir ./demo-data:/data wasmedge_quickjs.wasm server.js
+wasmedge --dir .:. --dir /data:./demo-data wasmedge_quickjs.wasm server.js
 ```
 
 그다음 `http://localhost:8080`을 엽니다.
@@ -179,7 +179,7 @@ wasmedge --dir .:. --dir ./demo-data:/data wasmedge_quickjs.wasm server.js
 
 ## 파일시스템 모델
 
-파일 I/O 탭은 의도적으로 `/data`에만 접근합니다. Docker Compose 또는 `docker run`을 사용할 때 `/data`는 `./demo-data`에 연결됩니다. WasmEdge CLI를 직접 사용할 때도 동일한 디렉토리를 `--dir ./demo-data:/data`로 노출해야 합니다.
+파일 I/O 탭은 의도적으로 `/data`에만 접근합니다. Docker Compose 또는 `docker run`을 사용할 때 `/data`는 `./demo-data`에 연결됩니다. WasmEdge CLI를 직접 사용할 때도 동일한 디렉토리를 `--dir /data:./demo-data`로 노출해야 합니다.
 
 애플리케이션은 임의의 호스트 경로를 탐색하지 않습니다. 접근 가능한 범위는 WASI를 통해 명시적으로 preopen한 디렉토리로 제한됩니다.
 
