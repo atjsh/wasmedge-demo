@@ -1,0 +1,7 @@
+.git
+demo-data
+*.md
+modules
+modules.zip
+wasmedge_quickjs.wasm
+tmp_demo_*.txt

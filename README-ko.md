@@ -28,7 +28,8 @@
 
 ## 실행 요구사항
 
-- [Wasm 지원](https://docs.docker.com/desktop/features/wasm/)을 활성화한 Docker Desktop 또는 로컬 WasmEdge CLI 설치
+- Wasm 워크로드를 실행할 수 있도록 준비된 Podman 설치. macOS와 Windows에서는 보통 동작 중인 `podman machine`이 필요합니다. [Podman 설치 가이드](https://podman.io/docs/installation)와 [Podman Desktop Wasm 가이드](https://podman-desktop.io/blog/wasm-workloads-on-macos-and-windows-with-podman)를 참고하세요.
+- 또는 컨테이너가 아닌 경로를 원할 때 사용할 로컬 WasmEdge CLI 설치
 - 파일 I/O 탭을 사용하려면 쓰기 가능한 `demo-data/` 디렉토리 필요
 - 외부 HTTP 데모를 위한 네트워크 연결
 
@@ -42,7 +43,7 @@
 | --- | --- | --- | --- |
 | 배포 단위 | GHCR 같은 레지스트리에서 가져오는 OCI/WASM 이미지 | npm 레지스트리에서 가져오는 패키지 | OS별 바이너리, 압축 파일, 또는 설치 프로그램 |
 | 실측 사례 (본 저장소 기준) | **~2.0 MiB** 이미지 (`scratch` 기반)<br>**31 KiB** 앱 로직 (`server.js`) | 측정하지 않음 (Node.js 런타임 선행 설치 필요) | 측정하지 않음 (보통 OS/아키텍처별 별도 자산 필요) |
-| 실행 환경 요구사항 | Wasm 지원 Docker Desktop 또는 WasmEdge CLI 설치 | 동작하는 Node.js + npm 환경 | 플랫폼별 설치 또는 다운로드 절차 |
+| 실행 환경 요구사항 | Wasm 지원 Podman 또는 WasmEdge CLI 설치 | 동작하는 Node.js + npm 환경 | 플랫폼별 설치 또는 다운로드 절차 |
 | 버전 관리 | OCI 태그와 digest로 pinning, promotion, rollback을 명시적으로 다루기 쉬움 | semver는 익숙하지만, `npx` 역시 버전을 명확히 pin하지 않으면 npm 해석 결과에 의존함 | 대체로 release asset, installer, 앱별 업데이트 채널에 의존 |
 | 언어 확장성 | WasmEdge 문서는 Rust, JavaScript, Go, Python 기반 앱 개발 경로를 강조하며, C/C++, Swift, AssemblyScript, Kotlin 등에서 컴파일한 표준 Wasm도 실행 가능하다고 설명함 | JavaScript/TypeScript에는 매우 강하지만, 다른 언어는 보통 바인딩이나 외부 프로세스로 연결됨 | 선택한 네이티브 스택에 따라 다르지만, 시간이 갈수록 플랫폼 종속성이 커지는 경우가 많음 |
 | 격리 모델 | WASI preopen을 통한 명시적 호스트 접근과 샌드박스 실행 | 별도 샌드박싱을 하지 않으면 일반 Node.js 프로세스 권한으로 실행 | 보통 가장 깊은 OS 접근 권한과 통합 면을 가짐 |
@@ -57,7 +58,7 @@
 
 ### 그래도 `npm` / `npx`가 더 나은 경우
 
-- 대상 사용자가 이미 Node.js를 갖고 있다면, `npx some-tool@version`은 Docker Wasm 지원을 켜거나 WasmEdge를 설치하게 하는 것보다 훨씬 마찰이 적을 수 있습니다.
+- 대상 사용자가 이미 Node.js를 갖고 있다면, `npx some-tool@version`은 Podman이나 WasmEdge를 설치하게 하는 것보다 훨씬 마찰이 적을 수 있습니다.
 - JavaScript 생태계, 패키지 탐색성, 디버깅 경험, 개발자 친숙도는 현재도 Node.js 경로가 더 강합니다.
 - 제품이 본질적으로 JS CLI라면, WasmEdge는 사용자 이득보다 런타임의 낯섦만 늘릴 수 있습니다.
 
@@ -80,58 +81,52 @@
 
 ## 실행 방법
 
-### 옵션 1: 공개된 GHCR 이미지 실행
+### 옵션 1: 로컬 Podman 스크립트
+
+이 저장소에서 권장하는 기본 로컬 컨테이너 실행 경로입니다.
+
+```bash
+./scripts/podman-build.sh
+./scripts/podman-run.sh
+```
+
+그다음 `http://localhost:8080`을 엽니다.
+
+스크립트는 다음을 수행합니다.
+
+- `localhost/wasmedge-demo:latest` 이미지를 빌드합니다.
+- GUI를 `http://localhost:8080`에서 실행합니다.
+- 필요하면 `./demo-data`를 만들고 `/data`에 마운트합니다.
+
+```bash
+IMAGE_NAME=localhost/wasmedge-demo:dev ./scripts/podman-build.sh
+HOST_PORT=18080 DATA_DIR="$HOME/wasmedge-demo-data" ./scripts/podman-run.sh
+```
+
+이 보조 스크립트는 macOS/Linux 셸을 대상으로 합니다. Windows에서는 아래와 같은 raw Podman 명령을 직접 사용하세요.
+
+```bash
+podman build --platform=wasi/wasm -t localhost/wasmedge-demo:latest .
+podman run --rm --platform=wasi/wasm -p 8080:8080 \
+  -v "<host-demo-data-path>:/data" \
+  localhost/wasmedge-demo:latest
+```
+
+### 옵션 2: 공개된 GHCR 이미지 실행
 
 로컬 빌드 없이 공개된 이미지를 바로 실행하려면 이 방법을 사용합니다.
 
 ```bash
 mkdir -p demo-data
 
-docker run --rm -p 8080:8080 \
-  --runtime=io.containerd.wasmedge.v1 \
-  --platform=wasi/wasm \
+podman run --rm --platform=wasi/wasm -p 8080:8080 \
   -v "$(pwd)/demo-data:/data" \
   ghcr.io/atjsh/wasmedge-demo:latest
 ```
 
 그다음 `http://localhost:8080`을 엽니다.
 
-### 옵션 2: Docker Compose
-
-저장소에서 이미지를 직접 빌드하게 하려면 이 방법이 가장 간단합니다.
-
-```bash
-mkdir -p demo-data
-docker compose up --build
-```
-
-그다음 `http://localhost:8080`을 엽니다.
-
-### 옵션 3: 로컬 Docker 빌드 / `docker run`
-
-먼저 이미지를 로컬에서 빌드합니다.
-
-```bash
-docker buildx build --platform wasi/wasm -t wasmedge-demo:latest .
-```
-
-사용 중인 `buildx` 드라이버가 이미지를 로컬 Docker 이미지 저장소에 자동 적재하지 않는다면 `--load`를 추가합니다.
-
-그다음 컨테이너를 실행합니다.
-
-```bash
-mkdir -p demo-data
-
-docker run --rm -p 8080:8080 \
-  --runtime=io.containerd.wasmedge.v1 \
-  --platform=wasi/wasm \
-  -v "$(pwd)/demo-data:/data" \
-  wasmedge-demo:latest
-```
-
-그다음 `http://localhost:8080`을 엽니다.
-
-### 옵션 4: WasmEdge CLI
+### 옵션 3: WasmEdge CLI
 
 ```bash
 # WasmEdge 설치
@@ -290,37 +285,30 @@ wasmedge --dir .:. --dir /data:./demo-data --env MODE=cli \
   wasmedge_quickjs.wasm -- server.js confluence page list --space-id 12345 | jq '.results[]'
 ```
 
-### Docker CLI 모드
+### Podman CLI 모드
 
-Docker Compose를 사용하여 CLI 모드를 실행할 수 있습니다.
-
-```yaml
-# docker-compose.yml (CLI 모드 예시)
-services:
-  cli:
-    image: ghcr.io/atjsh/wasmedge-demo:latest
-    runtime: io.containerd.wasmedge.v1
-    platform: wasi/wasm
-    volumes:
-      - ./demo-data:/data
-    environment:
-      MODE: cli
-      CONFLUENCE_SITE: mysite.atlassian.net
-      CONFLUENCE_EMAIL: me@example.com
-      CONFLUENCE_TOKEN: ${CONFLUENCE_TOKEN}
-    command: ["server.js", "confluence", "page", "list", "--space-id", "12345"]
-```
+Podman에서 명령을 override하고 `MODE=cli`를 넘겨 CLI 모드를 실행할 수 있습니다.
 
 ```bash
-# Docker Compose로 CLI 명령 실행
-CONFLUENCE_TOKEN=ATATT3x... docker compose run --rm cli
+mkdir -p demo-data
+
+podman run --rm --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  -e CONFLUENCE_SITE=mysite.atlassian.net \
+  -e CONFLUENCE_EMAIL=me@example.com \
+  -e CONFLUENCE_TOKEN=ATATT3x... \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence space list --pretty
 ```
+
+`./scripts/podman-build.sh`로 로컬 이미지를 빌드했다면 `ghcr.io/atjsh/wasmedge-demo:latest` 대신 `localhost/wasmedge-demo:latest`를 사용하면 됩니다.
 
 컨테이너 이미지에는 `/etc/ssl/certs/ca-certificates.crt`가 포함되고 `SSL_CERT_FILE`이 자동으로 설정되므로, 공개 HTTPS 엔드포인트에는 추가 마운트가 필요하지 않습니다. 커스텀 CA 번들이 필요할 때만 `SSL_CERT_FILE`을 덮어쓰면 됩니다.
 
 ## 파일시스템 모델
 
-파일 I/O 탭은 의도적으로 `/data`에만 접근합니다. Docker Compose 또는 `docker run`을 사용할 때 `/data`는 `./demo-data`에 연결됩니다. WasmEdge CLI를 직접 사용할 때도 동일한 디렉토리를 `--dir ./demo-data:/data`로 노출해야 합니다.
+파일 I/O 탭은 의도적으로 `/data`에만 접근합니다. Podman을 사용할 때 `/data`는 `./demo-data`에 연결됩니다. WasmEdge CLI를 직접 사용할 때도 동일한 디렉토리를 `--dir ./demo-data:/data`로 노출해야 합니다.
 
 애플리케이션은 임의의 호스트 경로를 탐색하지 않습니다. 접근 가능한 범위는 WASI를 통해 명시적으로 preopen한 디렉토리로 제한됩니다.
 
@@ -350,7 +338,13 @@ WASI preopen
 ## 이미지 빌드
 
 ```bash
-docker buildx build --platform wasi/wasm -t wasmedge-demo:latest .
+./scripts/podman-build.sh
+```
+
+동등한 raw 명령은 다음과 같습니다.
+
+```bash
+podman build --platform=wasi/wasm -t localhost/wasmedge-demo:latest .
 ```
 
 Dockerfile은 다음과 같은 간결한 multi-stage 흐름을 따릅니다.
@@ -360,7 +354,7 @@ Dockerfile은 다음과 같은 간결한 multi-stage 흐름을 따릅니다.
 3. `wasmedgec`로 AOT 컴파일을 적용합니다.
 4. 최종 `scratch` 이미지에는 런타임, `server.js`, `modules/`, CA 번들을 복사합니다.
 
-이 저장소는 생성된 런타임 자산을 커밋하지 않습니다. 로컬 WasmEdge CLI 준비와 Docker 빌드 모두 같은 bootstrap 스크립트를 사용합니다.
+이 저장소는 생성된 런타임 자산을 커밋하지 않습니다. 로컬 WasmEdge CLI 준비와 Podman 빌드 모두 같은 bootstrap 스크립트를 사용합니다.
 
 ## CI/CD 데모
 
@@ -413,7 +407,8 @@ docker buildx imagetools create \
 
 - [WasmEdge 문서](https://wasmedge.org/docs/)
 - [WasmEdge QuickJS](https://github.com/second-state/wasmedge-quickjs)
-- [Docker Desktop Wasm 지원](https://docs.docker.com/desktop/features/wasm/)
+- [Podman 설치](https://podman.io/docs/installation)
+- [Podman Desktop Wasm 가이드](https://podman-desktop.io/blog/wasm-workloads-on-macos-and-windows-with-podman)
 
 ## 라이선스
 

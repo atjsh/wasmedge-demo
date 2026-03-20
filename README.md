@@ -28,7 +28,8 @@ In practice, the user runs a container and opens `http://localhost:8080`. The br
 
 ## Runtime Requirements
 
-- Docker Desktop with [Wasm support](https://docs.docker.com/desktop/features/wasm/) enabled, or a local WasmEdge CLI installation
+- Podman installed and ready to run Wasm workloads. On macOS and Windows, this usually means a working `podman machine`. See the [Podman installation guide](https://podman.io/docs/installation) and the [Podman Desktop Wasm guide](https://podman-desktop.io/blog/wasm-workloads-on-macos-and-windows-with-podman).
+- Or a local WasmEdge CLI installation if you want the non-container fallback
 - A writable `demo-data/` directory if you want to use the file I/O tab
 - Network access for the outbound HTTP demo
 
@@ -42,7 +43,7 @@ The current published WasmEdge artifact for this repository is about `2.0 MiB` w
 | --- | --- | --- | --- |
 | Delivery unit | OCI/WASM image from a registry such as GHCR | Package from the npm registry | Platform-specific binary, archive, or installer |
 | Measured example in this repo | **~2.0 MiB** image (scratch base)<br>**31 KiB** app payload (`server.js`) | Not measured here; assumes preinstalled Node.js runtime | Not measured here; usually requires separate assets per OS/arch |
-| Target prerequisites | Docker Desktop with Wasm support, or a WasmEdge CLI install | A working Node.js + npm environment | Per-platform install or download flow |
+| Target prerequisites | Podman with Wasm support, or a WasmEdge CLI install | A working Node.js + npm environment | Per-platform install or download flow |
 | Version management | OCI tags and digests make pinning and rollback explicit | Semver is familiar, but `npx` still relies on npm resolution behavior unless versions are pinned carefully | Usually handled through release assets, installers, and app-specific update channels |
 | Language story | WasmEdge docs highlight app development in Rust, JavaScript, Go, and Python, plus standard Wasm compiled from languages such as C/C++, Swift, AssemblyScript, and Kotlin | Excellent for JavaScript and TypeScript; other languages usually enter through bindings or external processes | Depends on the chosen native stack, but often becomes more platform-specific over time |
 | Isolation model | Sandboxed runtime with explicit WASI preopens and controlled host access | Runs with normal Node.js process permissions unless separately sandboxed | Usually has the deepest OS access and the broadest integration surface |
@@ -57,7 +58,7 @@ The current published WasmEdge artifact for this repository is about `2.0 MiB` w
 
 ### Where `npm` / `npx` is still better
 
-- If your audience already has Node.js installed, `npx some-tool@version` is often lower-friction than asking them to enable Docker Wasm support or install WasmEdge.
+- If your audience already has Node.js installed, `npx some-tool@version` is often lower-friction than asking them to install Podman or WasmEdge.
 - The JavaScript tooling ecosystem, package discovery, debugging ergonomics, and developer familiarity are all better in the Node.js path today.
 - If the product is fundamentally just a JS CLI, WasmEdge can add runtime novelty without enough user-facing payoff.
 
@@ -80,58 +81,54 @@ The current published WasmEdge artifact for this repository is about `2.0 MiB` w
 
 ## Running the Demo
 
-### Option 1: Run the published GHCR image
+### Option 1: Local Podman scripts
+
+This is the primary local container workflow for this repository.
+
+```bash
+./scripts/podman-build.sh
+./scripts/podman-run.sh
+```
+
+The scripts:
+
+- build `localhost/wasmedge-demo:latest`
+- run the GUI on `http://localhost:8080`
+- create `./demo-data` if needed and mount it to `/data`
+
+Optional overrides:
+
+```bash
+IMAGE_NAME=localhost/wasmedge-demo:dev ./scripts/podman-build.sh
+HOST_PORT=18080 DATA_DIR="$HOME/wasmedge-demo-data" ./scripts/podman-run.sh
+```
+
+Then open `http://localhost:8080`.
+
+The helper scripts target macOS/Linux shells. On Windows, run the equivalent raw Podman commands instead:
+
+```bash
+podman build --platform=wasi/wasm -t localhost/wasmedge-demo:latest .
+podman run --rm --platform=wasi/wasm -p 8080:8080 \
+  -v "<host-demo-data-path>:/data" \
+  localhost/wasmedge-demo:latest
+```
+
+### Option 2: Run the published GHCR image
 
 Use this when you want to run the published image directly instead of building locally.
 
 ```bash
 mkdir -p demo-data
 
-docker run --rm -p 8080:8080 \
-  --runtime=io.containerd.wasmedge.v1 \
-  --platform=wasi/wasm \
+podman run --rm --platform=wasi/wasm -p 8080:8080 \
   -v "$(pwd)/demo-data:/data" \
   ghcr.io/atjsh/wasmedge-demo:latest
 ```
 
 Then open `http://localhost:8080`.
 
-### Option 2: Docker Compose
-
-This is the simplest local workflow when you want the repository to build the image for you.
-
-```bash
-mkdir -p demo-data
-docker compose up --build
-```
-
-Then open `http://localhost:8080`.
-
-### Option 3: Local Docker build / `docker run`
-
-Build the image locally first:
-
-```bash
-docker buildx build --platform wasi/wasm -t wasmedge-demo:latest .
-```
-
-If your `buildx` driver does not automatically load images into the local Docker image store, add `--load`.
-
-Run the container:
-
-```bash
-mkdir -p demo-data
-
-docker run --rm -p 8080:8080 \
-  --runtime=io.containerd.wasmedge.v1 \
-  --platform=wasi/wasm \
-  -v "$(pwd)/demo-data:/data" \
-  wasmedge-demo:latest
-```
-
-Then open `http://localhost:8080`.
-
-### Option 4: WasmEdge CLI
+### Option 3: WasmEdge CLI
 
 ```bash
 # Install WasmEdge
@@ -317,14 +314,14 @@ Use `--verbose` on any command to print debug information (request URLs, respons
 
 Pagination is supported on list-style commands with `--limit N` to set the page size and `--all` to automatically follow pagination and return every result.
 
-### Docker CLI Mode
+### Podman CLI Mode
 
-You can run CLI commands through Docker Compose or `docker run` by overriding the command and passing `MODE=cli`.
+You can run CLI commands through Podman by overriding the command and passing `MODE=cli`.
 
 ```bash
-docker run --rm \
-  --runtime=io.containerd.wasmedge.v1 \
-  --platform=wasi/wasm \
+mkdir -p demo-data
+
+podman run --rm --platform=wasi/wasm \
   -v "$(pwd)/demo-data:/data" \
   -e MODE=cli \
   -e CONFLUENCE_SITE=mysite.atlassian.net \
@@ -334,31 +331,13 @@ docker run --rm \
   confluence space list --pretty
 ```
 
-Or add a dedicated service to `docker-compose.yml`:
-
-```yaml
-services:
-  confluence-cli:
-    image: ghcr.io/atjsh/wasmedge-demo:latest
-    runtime: io.containerd.wasmedge.v1
-    platform: wasi/wasm
-    volumes:
-      - ./demo-data:/data
-    environment:
-      MODE: cli
-      CONFLUENCE_SITE: mysite.atlassian.net
-      CONFLUENCE_EMAIL: me@example.com
-      CONFLUENCE_TOKEN: ${CONFLUENCE_TOKEN}
-    command: ["confluence", "space", "list", "--pretty"]
-```
-
-Then run with `docker compose run --rm confluence-cli`.
+If you already built the local image with `./scripts/podman-build.sh`, replace `ghcr.io/atjsh/wasmedge-demo:latest` with `localhost/wasmedge-demo:latest`.
 
 The container image bundles `/etc/ssl/certs/ca-certificates.crt` and sets `SSL_CERT_FILE` automatically, so public HTTPS endpoints do not need extra mounts. Override `SSL_CERT_FILE` only when you need a custom CA bundle.
 
 ## Filesystem Model
 
-The File I/O tab is intentionally limited to `/data`. When using Docker Compose or `docker run`, `/data` is backed by `./demo-data`. When using the WasmEdge CLI directly, expose the same directory with `--dir /data:./demo-data`.
+The File I/O tab is intentionally limited to `/data`. When using Podman, `/data` is backed by `./demo-data`. When using the WasmEdge CLI directly, expose the same directory with `--dir /data:./demo-data`.
 
 The application does not browse arbitrary host paths. Access is limited to the directories explicitly preopened through WASI.
 
@@ -388,7 +367,13 @@ WASI preopens
 ## Building the Image
 
 ```bash
-docker buildx build --platform wasi/wasm -t wasmedge-demo:latest .
+./scripts/podman-build.sh
+```
+
+Equivalent raw command:
+
+```bash
+podman build --platform=wasi/wasm -t localhost/wasmedge-demo:latest .
 ```
 
 The Dockerfile follows a compact multi-stage flow:
@@ -398,7 +383,7 @@ The Dockerfile follows a compact multi-stage flow:
 3. apply AOT compilation with `wasmedgec`
 4. copy the runtime, `server.js`, `modules/`, and a CA bundle into a `scratch` image
 
-This repository does not commit generated runtime assets. The same bootstrap script is used for local WasmEdge CLI setup and for Docker builds.
+This repository does not commit generated runtime assets. The same bootstrap script is used for local WasmEdge CLI setup and for Podman builds.
 
 ## CI/CD Demo
 
@@ -451,7 +436,8 @@ docker buildx imagetools create \
 
 - [WasmEdge documentation](https://wasmedge.org/docs/)
 - [WasmEdge QuickJS](https://github.com/second-state/wasmedge-quickjs)
-- [Docker Desktop Wasm support](https://docs.docker.com/desktop/features/wasm/)
+- [Podman installation](https://podman.io/docs/installation)
+- [Wasm workloads on Podman Desktop](https://podman-desktop.io/blog/wasm-workloads-on-macos-and-windows-with-podman)
 
 ## License
 
