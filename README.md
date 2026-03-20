@@ -20,10 +20,11 @@ In practice, the user runs a container and opens `http://localhost:8080`. The br
 ## What the Demo Covers
 
 - A single-file JavaScript HTTP server running on WasmEdge QuickJS
-- A browser UI delivered as regular HTML/CSS/JS instead of a native windowing framework
+- A default browser GUI with four tabs: Runtime, HTTP, Files, and Server
+- A second `MODE=cli` execution path for the bundled Confluence toolkit
 - Outbound HTTP requests initiated from inside the WASM container
-- File access through a host-mapped `/data` directory
-- Runtime inspection and request logging endpoints exposed through the web UI
+- File access through a host-mapped `/data` directory plus an internal filesystem demo
+- Runtime inspection, request logging, and echo/debug endpoints exposed through the web UI
 
 ## Runtime Requirements
 
@@ -160,16 +161,19 @@ Then open `http://localhost:8080`.
 
 ## Web UI Reference
 
+The default `MODE=gui` experience is a browser UI with four tabs backed by the same `server.js` process.
+
 ### Runtime Info
 
-- Reports runtime details such as `os.type()`, `os.platform()`, and `os.arch()`
-- Shows process data including uptime and selected environment information
-- Explains the purpose of the codesign-free packaging model
+- Reports runtime details such as `os.type()`, `os.platform()`, `os.arch()`, `os.homedir()`, and `os.tmpdir()`
+- Shows process data including uptime and argv
+- Explains the purpose of the codesign-free packaging model and the WASI sandbox boundary
 
 ### HTTP Demo
 
 - Sends outbound requests from inside the WASM container
-- Supports GET, POST, and PUT
+- Supports ad hoc GET, POST, and PUT requests
+- Includes quick example buttons for `httpbin.org`
 - Displays response payloads and simple request timing
 
 ### File I/O Demo
@@ -177,12 +181,14 @@ Then open `http://localhost:8080`.
 - Lists files in the host-mapped `/data` directory
 - Creates, reads, updates, and deletes files from the browser
 - Shows file metadata and demonstrates the WASI preopen model
+- Includes an internal filesystem demo to contrast host-mounted `/data` with files written inside the WASM runtime
 
 ### Server Info
 
 - Displays recent request history captured by the server
 - Reports uptime and request counters
 - Includes an echo endpoint for request/response testing
+- Lets you refresh live server status from the UI
 
 ## CLI Mode — Confluence Toolkit
 
@@ -195,6 +201,20 @@ wasmedge --dir .:. --dir /data:./demo-data \
 ```
 
 The default mode (`MODE=gui`) starts the HTTP server on port 8080 exactly as described in the sections above. You do not need to set `MODE` at all for the existing browser-based demo.
+
+### CLI Feature Summary
+
+- `auth`: store credentials, inspect the active login source, and clear stored auth
+- `page`: list, get, create, update, delete, and traverse child trees
+- `space`: list spaces or retrieve a single space by ID
+- `search`: run CQL queries with pagination controls
+- `comment`: list, create, and delete footer comments on a page
+- `label`: list, add, and remove page labels
+- `version`: list page versions or fetch a specific version
+- `attachment`: list, upload, and download attachments through `/data`
+- `property`: list, read, and set content properties
+- `bulk`: export page JSON files to `/data` or import page JSON files from `/data`
+- Global flags: `--pretty`, `--verbose`, `--limit`, `--all`, `--help`
 
 ### Quick Start
 
@@ -236,20 +256,18 @@ wasmedge --dir .:. --dir /data:./demo-data --dir /etc/ssl:/etc/ssl:readonly \
 
 All commands follow the pattern `confluence <resource> <action> [flags]`.
 
-| Resource | Action | Description | Key Flags |
+| Resource | Actions | Description | Key Flags |
 | --- | --- | --- | --- |
-| `auth` | `login` | Store credentials to `/data/auth.json` | `--site`, `--email`, `--token` |
-| `page` | `list` | List pages in a space | `--space-id`, `--limit`, `--all` |
-| `page` | `get` | Retrieve a single page | positional page ID, `--pretty` |
-| `page` | `create` | Create a new page | `--space-id`, `--title`, `--body` |
-| `space` | `list` | List spaces | `--limit`, `--all`, `--pretty` |
-| `search` | *(default)* | Search content with CQL | `--cql`, `--limit`, `--all` |
-| `comment` | `list` | List comments on a page | `--page-id`, `--limit` |
-| `label` | `add` | Add labels to a page | `--page-id`, `--label` (comma-separated) |
-| `version` | `list` | List page versions | positional page ID, `--limit` |
-| `attachment` | `list` | List attachments on a page | `--page-id`, `--limit` |
-| `property` | `list` | List content properties | positional page ID |
-| `bulk` | `export` | Export multiple pages | `--space-id`, `--format` |
+| `auth` | `login`, `logout`, `status` | Manage stored and environment-based authentication | `--site`, `--email`, `--token` |
+| `page` | `list`, `get`, `create`, `update`, `delete`, `tree` | Manage pages and page hierarchies | `--space-id`, `--title`, `--body`, `--parent-id`, `--version`, `--purge`, `--depth`, `--body-format` |
+| `space` | `list`, `get` | Browse spaces and inspect one space by ID | `--limit`, `--all` |
+| `search` | default action | Search Confluence content with CQL | `--cql`, `--limit`, `--all` |
+| `comment` | `list`, `create`, `delete` | Manage footer comments on a page | `--page-id`, `--body`, `--limit` |
+| `label` | `list`, `add`, `remove` | Manage page labels | `--page-id`, `--label` |
+| `version` | `list`, `get` | Inspect page version history | positional page ID, `--version`, `--limit` |
+| `attachment` | `list`, `upload`, `download` | Manage attachments via `/data` paths | `--page-id`, `--file`, `--output`, `--limit` |
+| `property` | `list`, `get`, `set` | Inspect and update content properties | `--page-id`, `--key`, `--value` |
+| `bulk` | `export`, `import` | Export/import page JSON files in bulk | `--space-id`, `--output-dir`, `--input-dir` |
 
 Pass `--help` to any command to see its full flag list.
 

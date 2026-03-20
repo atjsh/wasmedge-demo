@@ -20,10 +20,11 @@
 ## 데모 범위
 
 - WasmEdge QuickJS에서 동작하는 단일 JavaScript HTTP 서버
-- 네이티브 윈도우 프레임워크 대신 일반 HTML/CSS/JS로 제공되는 브라우저 UI
+- Runtime, HTTP, Files, Server 네 개 탭으로 구성된 기본 브라우저 GUI
+- 번들된 Confluence 툴킷을 실행하는 `MODE=cli` 경로
 - WASM 컨테이너 내부에서 수행되는 외부 HTTP 요청
-- 호스트에 매핑된 `/data` 디렉토리를 통한 파일 접근
-- 웹 UI에서 확인할 수 있는 런타임 점검 및 요청 로그 API
+- 호스트에 매핑된 `/data` 디렉토리 접근과 내부 파일시스템 데모
+- 웹 UI에서 확인할 수 있는 런타임 점검, 요청 로그, echo/debug API
 
 ## 실행 요구사항
 
@@ -160,16 +161,19 @@ wasmedge --dir .:. --dir /data:./demo-data wasmedge_quickjs.wasm server.js
 
 ## Web UI 참고
 
+기본 `MODE=gui` 경험은 같은 `server.js` 프로세스가 제공하는 네 개 탭 브라우저 UI입니다.
+
 ### 런타임 정보
 
-- `os.type()`, `os.platform()`, `os.arch()` 같은 런타임 정보를 표시합니다.
-- 업타임과 일부 환경 정보 등 프로세스 데이터를 보여줍니다.
-- 코드서명 불필요 패키징 모델의 목적을 설명합니다.
+- `os.type()`, `os.platform()`, `os.arch()`, `os.homedir()`, `os.tmpdir()` 같은 런타임 정보를 표시합니다.
+- 업타임과 argv 등 프로세스 데이터를 보여줍니다.
+- 코드서명 불필요 패키징 모델과 WASI 샌드박스 경계의 목적을 설명합니다.
 
 ### HTTP 데모
 
 - WASM 컨테이너 내부에서 외부 요청을 전송합니다.
-- GET, POST, PUT 메서드를 지원합니다.
+- 임의의 GET, POST, PUT 요청을 지원합니다.
+- `httpbin.org` 빠른 예제 버튼을 제공합니다.
 - 응답 본문과 단순 요청 시간을 표시합니다.
 
 ### 파일 I/O 데모
@@ -177,12 +181,14 @@ wasmedge --dir .:. --dir /data:./demo-data wasmedge_quickjs.wasm server.js
 - 호스트에 매핑된 `/data` 디렉토리의 파일을 나열합니다.
 - 브라우저에서 파일 생성, 읽기, 수정, 삭제를 수행합니다.
 - 파일 메타데이터를 표시하고 WASI preopen 모델을 보여줍니다.
+- 호스트 마운트 `/data`와 WASM 런타임 내부 파일을 비교하는 내부 파일시스템 데모를 포함합니다.
 
 ### 서버 정보
 
 - 서버가 수집한 최근 요청 기록을 표시합니다.
 - 업타임과 요청 카운터를 보고합니다.
 - 요청/응답 테스트용 echo 엔드포인트를 포함합니다.
+- UI에서 서버 상태를 즉시 새로고침할 수 있습니다.
 
 ## CLI 모드 — Confluence 툴킷
 
@@ -192,6 +198,20 @@ wasmedge --dir .:. --dir /data:./demo-data wasmedge_quickjs.wasm server.js
 - **`MODE=cli`**: Atlassian Confluence REST API CLI 툴킷
 
 `MODE=cli`로 실행하면 HTTP 서버를 시작하지 않고, 명령줄에서 Confluence 페이지, 스페이스, 검색 등을 직접 관리할 수 있습니다.
+
+### CLI 기능 요약
+
+- `auth`: 인증 정보 저장, 현재 로그인 소스 확인, 저장된 인증 제거
+- `page`: 페이지 목록, 단건 조회, 생성, 수정, 삭제, 자식 트리 조회
+- `space`: 스페이스 목록 조회와 단건 조회
+- `search`: CQL 기반 검색과 페이지네이션 제어
+- `comment`: 페이지 footer comment 목록, 생성, 삭제
+- `label`: 페이지 레이블 목록, 추가, 제거
+- `version`: 페이지 버전 목록과 특정 버전 조회
+- `attachment`: `/data` 경로를 통한 첨부파일 목록, 업로드, 다운로드
+- `property`: content property 목록, 조회, 설정
+- `bulk`: `/data` 기준 JSON 파일 내보내기/가져오기
+- 전역 플래그: `--pretty`, `--verbose`, `--limit`, `--all`, `--help`
 
 ### 빠른 시작
 
@@ -225,18 +245,18 @@ wasmedge --dir .:. --dir /data:./demo-data --dir /etc/ssl:/etc/ssl:readonly \
 
 ### 명령어 참조
 
-| 리소스 | 액션 | 설명 |
-|--------|------|------|
-| auth | login, logout, status | 인증 관리 |
-| page | list, get, create, update, delete, tree | 페이지 관리 |
-| space | list, get | 스페이스 관리 |
-| search | (default) | CQL 검색 |
-| comment | list, create, delete | 댓글 관리 |
-| label | list, add, remove | 레이블 관리 |
-| version | list, get | 버전 관리 |
-| attachment | list, upload, download | 첨부파일 관리 |
-| property | list, get, set | 속성 관리 |
-| bulk | export, import | 대량 작업 |
+| 리소스 | 액션 | 설명 | 주요 플래그 |
+|--------|------|------|-------------|
+| auth | login, logout, status | 저장/환경 기반 인증 관리 | `--site`, `--email`, `--token` |
+| page | list, get, create, update, delete, tree | 페이지와 페이지 트리 관리 | `--space-id`, `--title`, `--body`, `--parent-id`, `--version`, `--purge`, `--depth`, `--body-format` |
+| space | list, get | 스페이스 목록과 단건 조회 | `--limit`, `--all` |
+| search | (default) | CQL로 콘텐츠 검색 | `--cql`, `--limit`, `--all` |
+| comment | list, create, delete | footer comment 관리 | `--page-id`, `--body`, `--limit` |
+| label | list, add, remove | 페이지 레이블 관리 | `--page-id`, `--label` |
+| version | list, get | 페이지 버전 이력 조회 | 페이지 ID, `--version`, `--limit` |
+| attachment | list, upload, download | `/data` 경로를 통한 첨부파일 관리 | `--page-id`, `--file`, `--output`, `--limit` |
+| property | list, get, set | content property 조회/설정 | `--page-id`, `--key`, `--value` |
+| bulk | export, import | JSON 파일 대량 내보내기/가져오기 | `--space-id`, `--output-dir`, `--input-dir` |
 
 ### 인증
 
