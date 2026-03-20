@@ -16,7 +16,7 @@ RUN unzip modules.zip
 RUN /root/.wasmedge/bin/wasmedgec wasmedge_quickjs.wasm wasmedge_quickjs.wasm
 
 FROM scratch
-ENTRYPOINT [ "wasmedge_quickjs.wasm", "server.js" ]
+ENTRYPOINT [ "wasmedge_quickjs.wasm", "--", "server.js" ]
 COPY --link --from=build /src/wasmedge_quickjs.wasm /wasmedge_quickjs.wasm
 COPY --link --from=build /src/server.js /server.js
 COPY --link --from=build /src/modules /modules

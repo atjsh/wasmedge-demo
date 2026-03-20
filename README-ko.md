@@ -177,6 +177,105 @@ wasmedge --dir .:. --dir ./demo-data:/data wasmedge_quickjs.wasm server.js
 - 업타임과 요청 카운터를 보고합니다.
 - 요청/응답 테스트용 echo 엔드포인트를 포함합니다.
 
+## CLI 모드 — Confluence 툴킷
+
+이 애플리케이션은 두 가지 모드로 실행할 수 있습니다.
+
+- **`MODE=gui`** (기본값): 기존 HTTP 서버 GUI
+- **`MODE=cli`**: Atlassian Confluence REST API CLI 툴킷
+
+`MODE=cli`로 실행하면 HTTP 서버를 시작하지 않고, 명령줄에서 Confluence 페이지, 스페이스, 검색 등을 직접 관리할 수 있습니다.
+
+### 빠른 시작
+
+먼저 인증 정보를 설정한 뒤 첫 번째 명령을 실행합니다.
+
+```bash
+# 인증
+wasmedge --dir .:. --dir /data:./demo-data --env MODE=cli wasmedge_quickjs.wasm -- server.js confluence auth login --site mysite.atlassian.net --email me@example.com --token ATATT3x...
+
+# 페이지 목록
+wasmedge --dir .:. --dir /data:./demo-data \
+  --env MODE=cli \
+  --env CONFLUENCE_SITE=mysite.atlassian.net \
+  --env CONFLUENCE_EMAIL=me@example.com \
+  --env CONFLUENCE_TOKEN=ATATT3x... \
+  wasmedge_quickjs.wasm -- server.js confluence page list --space-id 12345
+```
+
+### 명령어 참조
+
+| 리소스 | 액션 | 설명 |
+|--------|------|------|
+| auth | login, logout, status | 인증 관리 |
+| page | list, get, create, update, delete, tree | 페이지 관리 |
+| space | list, get | 스페이스 관리 |
+| search | (default) | CQL 검색 |
+| comment | list, create, delete | 댓글 관리 |
+| label | list, add, remove | 레이블 관리 |
+| version | list, get | 버전 관리 |
+| attachment | list, upload, download | 첨부파일 관리 |
+| property | list, get, set | 속성 관리 |
+| bulk | export, import | 대량 작업 |
+
+### 인증
+
+인증 정보는 두 가지 방법으로 제공할 수 있습니다.
+
+**환경 변수 방식** — 실행 시 환경 변수로 직접 전달합니다.
+
+- `CONFLUENCE_SITE` — Confluence 사이트 (예: `mysite.atlassian.net`)
+- `CONFLUENCE_EMAIL` — Atlassian 계정 이메일
+- `CONFLUENCE_TOKEN` — Atlassian API 토큰
+
+**저장 방식** — `auth login` 명령으로 인증 정보를 로컬에 저장합니다.
+
+```bash
+wasmedge --dir .:. --dir /data:./demo-data --env MODE=cli \
+  wasmedge_quickjs.wasm -- server.js confluence auth login \
+  --site mysite.atlassian.net --email me@example.com --token ATATT3x...
+```
+
+저장된 인증 상태는 `auth status`로 확인하고, `auth logout`으로 삭제할 수 있습니다. 환경 변수가 설정되어 있으면 저장된 인증 정보보다 우선합니다.
+
+### 출력 및 오류 처리
+
+- 모든 명령의 출력은 JSON 형식입니다.
+- 성공 시 종료 코드 `0`을 반환합니다.
+- 오류 발생 시 0이 아닌 종료 코드를 반환하며, 오류 메시지가 JSON으로 stderr에 출력됩니다.
+
+```bash
+# 출력 예시 — jq로 파싱
+wasmedge --dir .:. --dir /data:./demo-data --env MODE=cli \
+  wasmedge_quickjs.wasm -- server.js confluence page list --space-id 12345 | jq '.results[]'
+```
+
+### Docker CLI 모드
+
+Docker Compose를 사용하여 CLI 모드를 실행할 수 있습니다.
+
+```yaml
+# docker-compose.yml (CLI 모드 예시)
+services:
+  cli:
+    image: ghcr.io/atjsh/wasmedge-demo:latest
+    runtime: io.containerd.wasmedge.v1
+    platform: wasi/wasm
+    volumes:
+      - ./demo-data:/data
+    environment:
+      MODE: cli
+      CONFLUENCE_SITE: mysite.atlassian.net
+      CONFLUENCE_EMAIL: me@example.com
+      CONFLUENCE_TOKEN: ${CONFLUENCE_TOKEN}
+    command: ["server.js", "confluence", "page", "list", "--space-id", "12345"]
+```
+
+```bash
+# Docker Compose로 CLI 명령 실행
+CONFLUENCE_TOKEN=ATATT3x... docker compose run --rm cli
+```
+
 ## 파일시스템 모델
 
 파일 I/O 탭은 의도적으로 `/data`에만 접근합니다. Docker Compose 또는 `docker run`을 사용할 때 `/data`는 `./demo-data`에 연결됩니다. WasmEdge CLI를 직접 사용할 때도 동일한 디렉토리를 `--dir ./demo-data:/data`로 노출해야 합니다.

@@ -756,7 +756,8 @@ async function doEcho() {
 // ---------------------------------------------------------------------------
 function route(req, resp) {
   const { pathname } = parseUrl(req.url);
-  const method = req.method;
+  // WasmEdge QuickJS may expose lowercase method names
+  const method = String(req.method || '').toUpperCase();
 
   if (method === 'GET' && (pathname === '/' || pathname === '/index.html')) {
     logRequest(method, pathname, 200);
@@ -824,19 +825,1213 @@ function route(req, resp) {
   json(resp, 404, { error: 'Not found', path: pathname });
 }
 
-// ---------------------------------------------------------------------------
-// Start
-// ---------------------------------------------------------------------------
-const PORT = 8080;
+// ===========================================================================
+// CLI TOOLKIT — Atlassian Confluence CLI
+// ===========================================================================
 
-createServer((req, resp) => {
-  try {
-    route(req, resp);
-  } catch (e) {
-    print('Error handling request:', e);
-    try { json(resp, 500, { error: String(e) }); } catch (_) {}
+// ---------------------------------------------------------------------------
+// Utility: Base64 Encoder (manual, no btoa dependency)
+// ---------------------------------------------------------------------------
+function base64Encode(str) {
+  var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  var result = '';
+  for (var i = 0; i < str.length; i += 3) {
+    var a = str.charCodeAt(i);
+    var b = i + 1 < str.length ? str.charCodeAt(i + 1) : 0;
+    var c = i + 2 < str.length ? str.charCodeAt(i + 2) : 0;
+    var n = (a << 16) | (b << 8) | c;
+    result += chars[(n >> 18) & 63];
+    result += chars[(n >> 12) & 63];
+    result += i + 1 < str.length ? chars[(n >> 6) & 63] : '=';
+    result += i + 2 < str.length ? chars[n & 63] : '=';
   }
-}).listen(PORT, () => {
-  print('WasmEdge Demo server listening on port ' + PORT);
-  print('Open http://localhost:' + PORT + ' in your browser');
-});
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Utility: Exit with code
+// ---------------------------------------------------------------------------
+function exitProcess(code) {
+  try { globalThis.exit(code); } catch (e) {}
+  try { if (typeof process !== 'undefined' && process.exit) process.exit(code); } catch (e2) {}
+  throw new Error('EXIT_' + code);
+}
+
+// ---------------------------------------------------------------------------
+// Utility: Print to stderr
+// ---------------------------------------------------------------------------
+var CLI_DATA_DIR = (globalThis.env && globalThis.env.CLI_DATA_DIR) || '/data';
+
+function printErr(msg) {
+  try {
+    var buf = [];
+    for (var i = 0; i < msg.length; i++) buf.push(msg.charCodeAt(i));
+    buf.push(10);
+    var arr = new Uint8Array(buf);
+    os.write(2, arr.buffer, 0, arr.length);
+  } catch (e) {
+    print('[STDERR] ' + msg);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Utility: Output formatter
+// ---------------------------------------------------------------------------
+function cliOutput(data, flags) {
+  if (flags && flags.pretty) {
+    print(JSON.stringify(data, null, 2));
+  } else {
+    print(JSON.stringify(data));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Known flags definitions
+// ---------------------------------------------------------------------------
+var BOOLEAN_FLAGS = ['help', 'pretty', 'verbose', 'all', 'purge'];
+var KNOWN_FLAGS = [
+  'help', 'h', 'pretty', 'verbose', 'all', 'limit',
+  'space-id', 'body-format', 'title', 'body', 'parent-id', 'version',
+  'purge', 'depth', 'cql', 'page-id', 'label', 'file', 'output',
+  'site', 'email', 'token', 'key', 'value', 'output-dir', 'input-dir'
+];
+
+var KNOWN_RESOURCES = ['auth', 'page', 'space', 'search', 'comment', 'label', 'version', 'attachment', 'property', 'bulk'];
+
+// ---------------------------------------------------------------------------
+// Argument Parser
+// ---------------------------------------------------------------------------
+function parseArgs() {
+  var rawArgs = (globalThis.args || []).slice(1);
+  var idx = 0;
+
+  // Skip 'confluence' prefix if present
+  if (rawArgs.length > 0 && rawArgs[0] === 'confluence') {
+    idx++;
+  }
+
+  var resource = null;
+  var action = null;
+  var positional = [];
+  var flags = {};
+
+  // Parse resource
+  if (idx < rawArgs.length && rawArgs[idx] && rawArgs[idx].charAt(0) !== '-') {
+    resource = rawArgs[idx];
+    idx++;
+  }
+
+  // Parse action
+  if (idx < rawArgs.length && rawArgs[idx] && rawArgs[idx].charAt(0) !== '-') {
+    if (KNOWN_RESOURCES.indexOf(resource) !== -1) {
+      action = rawArgs[idx];
+      idx++;
+    }
+  }
+
+  // Parse remaining args
+  while (idx < rawArgs.length) {
+    var arg = rawArgs[idx];
+    if (arg === '-h') {
+      flags.help = true;
+      idx++;
+    } else if (arg.indexOf('--') === 0) {
+      var flagName = arg.slice(2);
+      if (KNOWN_FLAGS.indexOf(flagName) === -1) {
+        printErr(JSON.stringify({ error: true, code: 1, message: 'Unknown flag: ' + arg }));
+        exitProcess(1);
+      }
+      if (BOOLEAN_FLAGS.indexOf(flagName) !== -1) {
+        flags[flagName] = true;
+        idx++;
+      } else {
+        if (idx + 1 >= rawArgs.length || rawArgs[idx + 1].indexOf('--') === 0) {
+          printErr(JSON.stringify({ error: true, code: 4, message: 'Missing value for flag: ' + arg }));
+          exitProcess(4);
+        }
+        flags[flagName] = rawArgs[idx + 1];
+        idx += 2;
+      }
+    } else {
+      positional.push(arg);
+      idx++;
+    }
+  }
+
+  return { resource: resource, action: action, positional: positional, flags: flags };
+}
+
+// ---------------------------------------------------------------------------
+// Auth Module
+// ---------------------------------------------------------------------------
+function getAuth() {
+  var env = globalThis.env || {};
+
+  // Check env vars first
+  if (env.CONFLUENCE_SITE && env.CONFLUENCE_EMAIL && env.CONFLUENCE_TOKEN) {
+    return { site: env.CONFLUENCE_SITE, email: env.CONFLUENCE_EMAIL, token: env.CONFLUENCE_TOKEN, source: 'env' };
+  }
+
+  // Fall back to /data/auth.json
+  try {
+    var content = fs.readFileSync(CLI_DATA_DIR + '/auth.json', 'utf-8');
+    var data = JSON.parse(content);
+    if (data.site && data.email && data.token) {
+      return { site: data.site, email: data.email, token: data.token, source: 'stored' };
+    }
+  } catch (e) {
+    // File doesn't exist or isn't valid JSON
+  }
+
+  return null;
+}
+
+async function handleAuth(parsed) {
+  var action = parsed.action;
+  var flags = parsed.flags;
+
+  if (flags.help || !action) {
+    showHelp('auth');
+    exitProcess(0);
+  }
+
+  switch (action) {
+    case 'login': {
+      if (!flags.site) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --site' }));
+        exitProcess(4);
+      }
+      if (!flags.email) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --email' }));
+        exitProcess(4);
+      }
+      if (!flags.token) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --token' }));
+        exitProcess(4);
+      }
+      var authData = JSON.stringify({ site: flags.site, email: flags.email, token: flags.token });
+      fs.writeFileSync(CLI_DATA_DIR + '/auth.json', authData);
+      cliOutput({ ok: true, site: flags.site }, flags);
+      break;
+    }
+    case 'logout': {
+      try { fs.unlinkSync(CLI_DATA_DIR + '/auth.json'); } catch (e) { /* ignore if not exists */ }
+      cliOutput({ ok: true, message: 'Logged out' }, flags);
+      break;
+    }
+    case 'status': {
+      var auth = getAuth();
+      if (!auth) {
+        printErr(JSON.stringify({ error: true, code: 2, message: 'Not authenticated. Run: confluence auth login --site SITE --email EMAIL --token TOKEN' }));
+        exitProcess(2);
+      }
+      cliOutput({ authenticated: true, site: auth.site, email: auth.email, source: auth.source }, flags);
+      break;
+    }
+    default:
+      printErr(JSON.stringify({ error: true, code: 1, message: 'Unknown auth action: ' + action + '. Valid: login, logout, status' }));
+      exitProcess(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Confluence HTTP Client
+// ---------------------------------------------------------------------------
+async function confluenceApi(method, path, body, flags) {
+  var auth = getAuth();
+  if (!auth) {
+    printErr(JSON.stringify({ error: true, code: 2, message: 'Not authenticated. Run: confluence auth login --site SITE --email EMAIL --token TOKEN' }));
+    exitProcess(2);
+  }
+
+  var env = globalThis.env || {};
+  var baseUrl = env.CONFLUENCE_BASE_URL || ('https://' + auth.site + '/wiki/api/v2');
+  var url = baseUrl + path;
+
+  var headers = {
+    'Authorization': 'Basic ' + base64Encode(auth.email + ':' + auth.token),
+    'Content-Type': 'application/json',
+    'Accept': 'application/json'
+  };
+
+  if (flags && flags.verbose) {
+    printErr(JSON.stringify({ debug: true, request: { method: method, url: url, headers: { 'Authorization': 'Basic ***' } } }));
+  }
+
+  var fetchOpts = { method: method, headers: headers };
+  if (body) fetchOpts.body = JSON.stringify(body);
+
+  var resp = await fetch(url, fetchOpts);
+  var data;
+  try {
+    data = await resp.json();
+  } catch (e) {
+    data = {};
+  }
+
+  if (resp.status === 401 || resp.status === 403) {
+    printErr(JSON.stringify({ error: true, code: 2, message: data.message || 'Authentication failed (HTTP ' + resp.status + ')', status: resp.status }));
+    exitProcess(2);
+  }
+  if (resp.status === 404) {
+    printErr(JSON.stringify({ error: true, code: 3, message: 'Not found' + (data.message ? ': ' + data.message : ''), status: 404 }));
+    exitProcess(3);
+  }
+  if (resp.status >= 400) {
+    printErr(JSON.stringify({ error: true, code: 1, message: data.message || 'API error (HTTP ' + resp.status + ')', status: resp.status }));
+    exitProcess(1);
+  }
+
+  return data;
+}
+
+// Raw fetch for binary responses (attachment download)
+async function confluenceRawFetch(method, path, flags) {
+  var auth = getAuth();
+  if (!auth) {
+    printErr(JSON.stringify({ error: true, code: 2, message: 'Not authenticated.' }));
+    exitProcess(2);
+  }
+
+  var env = globalThis.env || {};
+  var baseUrl = env.CONFLUENCE_BASE_URL || ('https://' + auth.site + '/wiki/api/v2');
+  var url = baseUrl + path;
+
+  var headers = {
+    'Authorization': 'Basic ' + base64Encode(auth.email + ':' + auth.token),
+    'Accept': '*/*'
+  };
+
+  if (flags && flags.verbose) {
+    printErr(JSON.stringify({ debug: true, request: { method: method, url: url } }));
+  }
+
+  var resp = await fetch(url, { method: method, headers: headers });
+
+  if (resp.status === 401 || resp.status === 403) {
+    printErr(JSON.stringify({ error: true, code: 2, message: 'Authentication failed' }));
+    exitProcess(2);
+  }
+  if (resp.status === 404) {
+    printErr(JSON.stringify({ error: true, code: 3, message: 'Not found' }));
+    exitProcess(3);
+  }
+  if (resp.status >= 400) {
+    printErr(JSON.stringify({ error: true, code: 1, message: 'API error (HTTP ' + resp.status + ')' }));
+    exitProcess(1);
+  }
+
+  return resp;
+}
+
+// ---------------------------------------------------------------------------
+// Pagination Handler
+// ---------------------------------------------------------------------------
+async function paginatedFetch(path, flags) {
+  if (!flags.all) {
+    var sep = path.indexOf('?') !== -1 ? '&' : '?';
+    var url = flags.limit ? path + sep + 'limit=' + flags.limit : path;
+    return await confluenceApi('GET', url, null, flags);
+  }
+
+  // --all: follow cursor links
+  var basePath = path.indexOf('?') !== -1 ? path.split('?')[0] : path;
+  var allResults = [];
+  var nextPath = flags.limit ? path + (path.indexOf('?') !== -1 ? '&' : '?') + 'limit=' + flags.limit : path;
+  while (nextPath) {
+    // If nextPath is relative (starts with ?), prepend the base path
+    if (nextPath.charAt(0) === '?') {
+      nextPath = basePath + nextPath;
+    }
+    var data = await confluenceApi('GET', nextPath, null, flags);
+    allResults = allResults.concat(data.results || []);
+    nextPath = (data._links && data._links.next) ? data._links.next : null;
+  }
+  return { results: allResults, _meta: { total_fetched: allResults.length }, _links: {} };
+}
+
+// ---------------------------------------------------------------------------
+// Help System
+// ---------------------------------------------------------------------------
+function showHelp(resource, action) {
+  if (!resource) {
+    print('USAGE');
+    print('  confluence <command> [options]');
+    print('');
+    print('COMMANDS');
+    print('  auth          Manage authentication');
+    print('  page          Manage pages');
+    print('  space         Manage spaces');
+    print('  search        Search content');
+    print('  comment       Manage comments');
+    print('  label         Manage labels');
+    print('  version       Manage page versions');
+    print('  attachment    Manage attachments');
+    print('  property      Manage content properties');
+    print('  bulk          Bulk operations');
+    print('');
+    print('GLOBAL FLAGS');
+    print('  --help, -h    Show help');
+    print('  --pretty      Pretty-print JSON output');
+    print('  --verbose     Show debug information');
+    print('  --all         Fetch all pages (pagination)');
+    print('  --limit N     Limit results per page');
+    return;
+  }
+
+  switch (resource) {
+    case 'auth':
+      print('USAGE');
+      print('  confluence auth <action> [options]');
+      print('');
+      print('ACTIONS');
+      print('  login         Log in to Confluence');
+      print('  logout        Log out and remove stored credentials');
+      print('  status        Show current authentication status');
+      print('');
+      print('FLAGS');
+      print('  --site SITE     Confluence site (e.g. mysite.atlassian.net)');
+      print('  --email EMAIL   User email address');
+      print('  --token TOKEN   API token');
+      print('');
+      print('EXAMPLES');
+      print('  confluence auth login --site mysite.atlassian.net --email user@example.com --token ATATT...');
+      print('  confluence auth status');
+      print('  confluence auth logout');
+      break;
+
+    case 'page':
+      if (action === 'create') {
+        print('USAGE');
+        print('  confluence page create [options]');
+        print('');
+        print('FLAGS');
+        print('  --space-id ID     Space ID (required)');
+        print('  --title TITLE     Page title (required)');
+        print('  --body BODY       Page body (HTML)');
+        print('  --parent-id PID   Parent page ID');
+        print('');
+        print('EXAMPLES');
+        print('  confluence page create --space-id 456 --title "My Page"');
+        print('  confluence page create --space-id 456 --title "Child" --parent-id 123 --body "<p>Hello</p>"');
+        return;
+      }
+      if (action === 'update') {
+        print('USAGE');
+        print('  confluence page update <id> [options]');
+        print('');
+        print('FLAGS');
+        print('  --title TITLE     New page title');
+        print('  --version N       Version number (required)');
+        print('  --body BODY       New page body (HTML)');
+        print('');
+        print('EXAMPLES');
+        print('  confluence page update 123 --title "Updated Title" --version 4');
+        return;
+      }
+      print('USAGE');
+      print('  confluence page <action> [options]');
+      print('');
+      print('ACTIONS');
+      print('  list          List pages');
+      print('  get           Get a page by ID');
+      print('  create        Create a new page');
+      print('  update        Update a page');
+      print('  delete        Delete a page');
+      print('  tree          Get page tree (children)');
+      print('');
+      print('FLAGS');
+      print('  --space-id ID        Filter by space ID');
+      print('  --body-format FMT    Body format (storage, atlas_doc_format)');
+      print('  --title TITLE        Page title');
+      print('  --body BODY          Page body content');
+      print('  --parent-id PID      Parent page ID');
+      print('  --version N          Version number');
+      print('  --purge              Permanently delete');
+      print('  --depth N            Tree depth');
+      print('');
+      print('EXAMPLES');
+      print('  confluence page list --space-id 456');
+      print('  confluence page get 123');
+      print('  confluence page create --space-id 456 --title "New Page"');
+      print('  confluence page delete 123 --purge');
+      print('  confluence page tree 123 --depth 2');
+      break;
+
+    case 'space':
+      print('USAGE');
+      print('  confluence space <action> [options]');
+      print('');
+      print('ACTIONS');
+      print('  list          List spaces');
+      print('  get           Get a space by ID');
+      print('');
+      print('FLAGS');
+      print('  --limit N     Limit results');
+      print('');
+      print('EXAMPLES');
+      print('  confluence space list');
+      print('  confluence space get 456');
+      break;
+
+    case 'search':
+      print('USAGE');
+      print('  confluence search [options]');
+      print('');
+      print('FLAGS');
+      print('  --cql QUERY   CQL search query (required)');
+      print('  --limit N     Limit results');
+      print('  --all         Fetch all results');
+      print('');
+      print('EXAMPLES');
+      print('  confluence search --cql "type=page AND space=DEV"');
+      print('  confluence search --cql "title~test" --limit 10');
+      break;
+
+    case 'comment':
+      print('USAGE');
+      print('  confluence comment <action> [options]');
+      print('');
+      print('ACTIONS');
+      print('  list          List comments on a page');
+      print('  create        Create a comment');
+      print('  delete        Delete a comment');
+      print('');
+      print('FLAGS');
+      print('  --page-id ID  Page ID (required for list/create)');
+      print('  --body BODY   Comment body (required for create)');
+      print('');
+      print('EXAMPLES');
+      print('  confluence comment list --page-id 123');
+      print('  confluence comment create --page-id 123 --body "<p>Nice!</p>"');
+      print('  confluence comment delete 555');
+      break;
+
+    case 'label':
+      print('USAGE');
+      print('  confluence label <action> [options]');
+      print('');
+      print('ACTIONS');
+      print('  list          List labels on a page');
+      print('  add           Add labels to a page');
+      print('  remove        Remove a label from a page');
+      print('');
+      print('FLAGS');
+      print('  --page-id ID    Page ID (required)');
+      print('  --label NAMES   Label name(s), comma-separated');
+      print('');
+      print('EXAMPLES');
+      print('  confluence label list --page-id 123');
+      print('  confluence label add --page-id 123 --label "reviewed,approved"');
+      print('  confluence label remove --page-id 123 --label "draft"');
+      break;
+
+    case 'version':
+      print('USAGE');
+      print('  confluence version <action> [options]');
+      print('');
+      print('ACTIONS');
+      print('  list          List page versions');
+      print('  get           Get a specific version');
+      print('');
+      print('FLAGS');
+      print('  --version N   Version number (required for get)');
+      print('');
+      print('EXAMPLES');
+      print('  confluence version list 123');
+      print('  confluence version get 123 --version 2');
+      break;
+
+    case 'attachment':
+      print('USAGE');
+      print('  confluence attachment <action> [options]');
+      print('');
+      print('ACTIONS');
+      print('  list          List attachments on a page');
+      print('  upload        Upload an attachment');
+      print('  download      Download an attachment');
+      print('');
+      print('FLAGS');
+      print('  --page-id ID    Page ID (required for list/upload)');
+      print('  --file PATH     File path to upload');
+      print('  --output PATH   Output file path for download');
+      print('');
+      print('EXAMPLES');
+      print('  confluence attachment list --page-id 123');
+      print('  confluence attachment upload --page-id 123 --file /data/doc.pdf');
+      print('  confluence attachment download ATT1 --output /data/out.pdf');
+      break;
+
+    case 'property':
+      print('USAGE');
+      print('  confluence property <action> [options]');
+      print('');
+      print('ACTIONS');
+      print('  list          List content properties');
+      print('  get           Get a content property');
+      print('  set           Set a content property');
+      print('');
+      print('FLAGS');
+      print('  --page-id ID    Page ID (required)');
+      print('  --key KEY       Property key');
+      print('  --value JSON    Property value (JSON string)');
+      print('');
+      print('EXAMPLES');
+      print('  confluence property list --page-id 123');
+      print('  confluence property get --page-id 123 --key "metadata"');
+      print('  confluence property set --page-id 123 --key "status" --value \'{"done":true}\'');
+      break;
+
+    case 'bulk':
+      print('USAGE');
+      print('  confluence bulk <action> [options]');
+      print('');
+      print('ACTIONS');
+      print('  export        Export all pages in a space');
+      print('  import        Import pages into a space');
+      print('');
+      print('FLAGS');
+      print('  --space-id ID       Space ID (required)');
+      print('  --output-dir PATH   Output directory for export');
+      print('  --input-dir PATH    Input directory for import');
+      print('');
+      print('EXAMPLES');
+      print('  confluence bulk export --space-id 456 --output-dir /data/backup');
+      print('  confluence bulk import --space-id 456 --input-dir /data/backup');
+      break;
+
+    default:
+      showHelp();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Resource Handlers: Page
+// ---------------------------------------------------------------------------
+async function handlePage(parsed) {
+  var action = parsed.action;
+  var flags = parsed.flags;
+  var positional = parsed.positional;
+
+  if (flags.help || !action) {
+    showHelp('page', action);
+    exitProcess(0);
+  }
+
+  switch (action) {
+    case 'list': {
+      var path = '/pages';
+      if (flags['space-id']) path += '?space-id=' + encodeURIComponent(flags['space-id']);
+      var data = await paginatedFetch(path, flags);
+      cliOutput(data, flags);
+      break;
+    }
+    case 'get': {
+      if (positional.length < 1) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required argument: <page-id>' }));
+        exitProcess(4);
+      }
+      var pageId = positional[0];
+      var path = '/pages/' + encodeURIComponent(pageId);
+      if (flags['body-format']) path += '?body-format=' + encodeURIComponent(flags['body-format']);
+      var data = await confluenceApi('GET', path, null, flags);
+      cliOutput(data, flags);
+      break;
+    }
+    case 'create': {
+      if (!flags['space-id']) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --space-id' }));
+        exitProcess(4);
+      }
+      if (!flags.title) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --title' }));
+        exitProcess(4);
+      }
+      var body = { spaceId: flags['space-id'], title: flags.title, status: 'current' };
+      if (flags.body) body.body = { storage: { value: flags.body, representation: 'storage' } };
+      if (flags['parent-id']) body.parentId = flags['parent-id'];
+      var data = await confluenceApi('POST', '/pages', body, flags);
+      cliOutput(data, flags);
+      break;
+    }
+    case 'update': {
+      if (positional.length < 1) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required argument: <page-id>' }));
+        exitProcess(4);
+      }
+      if (!flags.version) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --version' }));
+        exitProcess(4);
+      }
+      var pageId = positional[0];
+      var body = { id: pageId, status: 'current', version: { number: parseInt(flags.version, 10), message: '' } };
+      if (flags.title) body.title = flags.title;
+      if (flags.body) body.body = { storage: { value: flags.body, representation: 'storage' } };
+      var data = await confluenceApi('PUT', '/pages/' + encodeURIComponent(pageId), body, flags);
+      cliOutput(data, flags);
+      break;
+    }
+    case 'delete': {
+      if (positional.length < 1) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required argument: <page-id>' }));
+        exitProcess(4);
+      }
+      var pageId = positional[0];
+      var path = '/pages/' + encodeURIComponent(pageId);
+      if (flags.purge) path += '?purge=true';
+      var data = await confluenceApi('DELETE', path, null, flags);
+      if (flags.purge) data.purged = true;
+      cliOutput(data, flags);
+      break;
+    }
+    case 'tree': {
+      if (positional.length < 1) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required argument: <page-id>' }));
+        exitProcess(4);
+      }
+      var pageId = positional[0];
+      var depth = flags.depth ? parseInt(flags.depth, 10) : 1;
+
+      async function fetchChildren(pid, d) {
+        if (d <= 0) return [];
+        var data = await confluenceApi('GET', '/pages/' + encodeURIComponent(pid) + '/children', null, flags);
+        var children = data.results || [];
+        for (var i = 0; i < children.length; i++) {
+          children[i].children = await fetchChildren(children[i].id, d - 1);
+        }
+        return children;
+      }
+
+      var children = await fetchChildren(pageId, depth);
+      cliOutput({ id: pageId, children: children }, flags);
+      break;
+    }
+    default: {
+      if (flags.help) { showHelp('page', action); exitProcess(0); }
+      printErr(JSON.stringify({ error: true, code: 1, message: 'Unknown page action: ' + action + '. Valid: list, get, create, update, delete, tree' }));
+      exitProcess(1);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Resource Handlers: Space
+// ---------------------------------------------------------------------------
+async function handleSpace(parsed) {
+  var action = parsed.action;
+  var flags = parsed.flags;
+  var positional = parsed.positional;
+
+  if (flags.help || !action) {
+    showHelp('space');
+    exitProcess(0);
+  }
+
+  switch (action) {
+    case 'list': {
+      var data = await paginatedFetch('/spaces', flags);
+      cliOutput(data, flags);
+      break;
+    }
+    case 'get': {
+      if (positional.length < 1) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required argument: <space-id>' }));
+        exitProcess(4);
+      }
+      var data = await confluenceApi('GET', '/spaces/' + encodeURIComponent(positional[0]), null, flags);
+      cliOutput(data, flags);
+      break;
+    }
+    default:
+      printErr(JSON.stringify({ error: true, code: 1, message: 'Unknown space action: ' + action }));
+      exitProcess(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Resource Handlers: Search
+// ---------------------------------------------------------------------------
+async function handleSearch(parsed) {
+  var flags = parsed.flags;
+
+  if (flags.help) {
+    showHelp('search');
+    exitProcess(0);
+  }
+
+  if (!flags.cql) {
+    printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --cql' }));
+    exitProcess(4);
+  }
+
+  var path = '/search?cql=' + encodeURIComponent(flags.cql);
+  var data = await paginatedFetch(path, flags);
+  cliOutput(data, flags);
+}
+
+// ---------------------------------------------------------------------------
+// Resource Handlers: Comment
+// ---------------------------------------------------------------------------
+async function handleComment(parsed) {
+  var action = parsed.action;
+  var flags = parsed.flags;
+  var positional = parsed.positional;
+
+  if (flags.help || !action) {
+    showHelp('comment');
+    exitProcess(0);
+  }
+
+  switch (action) {
+    case 'list': {
+      if (!flags['page-id']) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --page-id' }));
+        exitProcess(4);
+      }
+      var data = await paginatedFetch('/pages/' + encodeURIComponent(flags['page-id']) + '/footer-comments', flags);
+      cliOutput(data, flags);
+      break;
+    }
+    case 'create': {
+      if (!flags['page-id']) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --page-id' }));
+        exitProcess(4);
+      }
+      if (!flags.body) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --body' }));
+        exitProcess(4);
+      }
+      var body = { pageId: flags['page-id'], body: { storage: { value: flags.body } } };
+      var data = await confluenceApi('POST', '/footer-comments', body, flags);
+      cliOutput(data, flags);
+      break;
+    }
+    case 'delete': {
+      if (positional.length < 1) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required argument: <comment-id>' }));
+        exitProcess(4);
+      }
+      var data = await confluenceApi('DELETE', '/footer-comments/' + encodeURIComponent(positional[0]), null, flags);
+      cliOutput(data, flags);
+      break;
+    }
+    default:
+      printErr(JSON.stringify({ error: true, code: 1, message: 'Unknown comment action: ' + action }));
+      exitProcess(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Resource Handlers: Label
+// ---------------------------------------------------------------------------
+async function handleLabel(parsed) {
+  var action = parsed.action;
+  var flags = parsed.flags;
+
+  if (flags.help || !action) {
+    showHelp('label');
+    exitProcess(0);
+  }
+
+  switch (action) {
+    case 'list': {
+      if (!flags['page-id']) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --page-id' }));
+        exitProcess(4);
+      }
+      var data = await confluenceApi('GET', '/pages/' + encodeURIComponent(flags['page-id']) + '/labels', null, flags);
+      cliOutput(data, flags);
+      break;
+    }
+    case 'add': {
+      if (!flags['page-id']) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --page-id' }));
+        exitProcess(4);
+      }
+      if (!flags.label) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --label' }));
+        exitProcess(4);
+      }
+      var labelNames = flags.label.split(',').map(function(l) { return l.trim(); });
+      var body = labelNames.map(function(name) { return { name: name, prefix: 'global' }; });
+      var data = await confluenceApi('POST', '/pages/' + encodeURIComponent(flags['page-id']) + '/labels', body, flags);
+      cliOutput(data, flags);
+      break;
+    }
+    case 'remove': {
+      if (!flags['page-id']) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --page-id' }));
+        exitProcess(4);
+      }
+      if (!flags.label) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --label' }));
+        exitProcess(4);
+      }
+      var data = await confluenceApi('DELETE', '/pages/' + encodeURIComponent(flags['page-id']) + '/labels/' + encodeURIComponent(flags.label), null, flags);
+      cliOutput(data, flags);
+      break;
+    }
+    default:
+      printErr(JSON.stringify({ error: true, code: 1, message: 'Unknown label action: ' + action }));
+      exitProcess(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Resource Handlers: Version
+// ---------------------------------------------------------------------------
+async function handleVersion(parsed) {
+  var action = parsed.action;
+  var flags = parsed.flags;
+  var positional = parsed.positional;
+
+  if (flags.help || !action) {
+    showHelp('version');
+    exitProcess(0);
+  }
+
+  switch (action) {
+    case 'list': {
+      if (positional.length < 1) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required argument: <page-id>' }));
+        exitProcess(4);
+      }
+      var data = await paginatedFetch('/pages/' + encodeURIComponent(positional[0]) + '/versions', flags);
+      cliOutput(data, flags);
+      break;
+    }
+    case 'get': {
+      if (positional.length < 1) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required argument: <page-id>' }));
+        exitProcess(4);
+      }
+      if (!flags.version) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --version' }));
+        exitProcess(4);
+      }
+      var data = await confluenceApi('GET', '/pages/' + encodeURIComponent(positional[0]) + '/versions/' + encodeURIComponent(flags.version), null, flags);
+      cliOutput(data, flags);
+      break;
+    }
+    default:
+      printErr(JSON.stringify({ error: true, code: 1, message: 'Unknown version action: ' + action }));
+      exitProcess(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Resource Handlers: Attachment
+// ---------------------------------------------------------------------------
+async function handleAttachment(parsed) {
+  var action = parsed.action;
+  var flags = parsed.flags;
+  var positional = parsed.positional;
+
+  if (flags.help || !action) {
+    showHelp('attachment');
+    exitProcess(0);
+  }
+
+  switch (action) {
+    case 'list': {
+      if (!flags['page-id']) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --page-id' }));
+        exitProcess(4);
+      }
+      var data = await paginatedFetch('/pages/' + encodeURIComponent(flags['page-id']) + '/attachments', flags);
+      cliOutput(data, flags);
+      break;
+    }
+    case 'upload': {
+      if (!flags['page-id']) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --page-id' }));
+        exitProcess(4);
+      }
+      if (!flags.file) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --file' }));
+        exitProcess(4);
+      }
+      var filePath = flags.file;
+      var fileContent;
+      try {
+        fileContent = fs.readFileSync(filePath, 'utf-8');
+      } catch (e) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Cannot read file: ' + filePath }));
+        exitProcess(4);
+      }
+      var fileName = filePath.split('/').pop();
+      var body = { title: fileName, mediaType: 'application/octet-stream', fileSize: fileContent.length };
+      var data = await confluenceApi('POST', '/pages/' + encodeURIComponent(flags['page-id']) + '/attachments', body, flags);
+      cliOutput(data, flags);
+      break;
+    }
+    case 'download': {
+      if (positional.length < 1) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required argument: <attachment-id>' }));
+        exitProcess(4);
+      }
+      if (!flags.output) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --output' }));
+        exitProcess(4);
+      }
+      var resp = await confluenceRawFetch('GET', '/attachments/' + encodeURIComponent(positional[0]) + '/download', flags);
+      var content = await resp.text();
+      fs.writeFileSync(flags.output, content);
+      cliOutput({ ok: true, path: flags.output, size: content.length }, flags);
+      break;
+    }
+    default:
+      printErr(JSON.stringify({ error: true, code: 1, message: 'Unknown attachment action: ' + action }));
+      exitProcess(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Resource Handlers: Property
+// ---------------------------------------------------------------------------
+async function handleProperty(parsed) {
+  var action = parsed.action;
+  var flags = parsed.flags;
+
+  if (flags.help || !action) {
+    showHelp('property');
+    exitProcess(0);
+  }
+
+  switch (action) {
+    case 'list': {
+      if (!flags['page-id']) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --page-id' }));
+        exitProcess(4);
+      }
+      var data = await confluenceApi('GET', '/pages/' + encodeURIComponent(flags['page-id']) + '/properties', null, flags);
+      cliOutput(data, flags);
+      break;
+    }
+    case 'get': {
+      if (!flags['page-id']) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --page-id' }));
+        exitProcess(4);
+      }
+      if (!flags.key) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --key' }));
+        exitProcess(4);
+      }
+      var data = await confluenceApi('GET', '/pages/' + encodeURIComponent(flags['page-id']) + '/properties?key=' + encodeURIComponent(flags.key), null, flags);
+      cliOutput(data, flags);
+      break;
+    }
+    case 'set': {
+      if (!flags['page-id']) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --page-id' }));
+        exitProcess(4);
+      }
+      if (!flags.key) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --key' }));
+        exitProcess(4);
+      }
+      if (!flags.value) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --value' }));
+        exitProcess(4);
+      }
+      var val;
+      try { val = JSON.parse(flags.value); } catch (e) { val = flags.value; }
+      var body = { key: flags.key, value: val };
+      var data = await confluenceApi('POST', '/pages/' + encodeURIComponent(flags['page-id']) + '/properties', body, flags);
+      cliOutput(data, flags);
+      break;
+    }
+    default:
+      printErr(JSON.stringify({ error: true, code: 1, message: 'Unknown property action: ' + action }));
+      exitProcess(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Resource Handlers: Bulk
+// ---------------------------------------------------------------------------
+async function handleBulk(parsed) {
+  var action = parsed.action;
+  var flags = parsed.flags;
+
+  if (flags.help || !action) {
+    showHelp('bulk');
+    exitProcess(0);
+  }
+
+  switch (action) {
+    case 'export': {
+      if (!flags['space-id']) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --space-id' }));
+        exitProcess(4);
+      }
+      if (!flags['output-dir']) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --output-dir' }));
+        exitProcess(4);
+      }
+      var data = await confluenceApi('GET', '/spaces/' + encodeURIComponent(flags['space-id']) + '/pages', null, flags);
+      var pages = data.results || [];
+      try { fs.mkdirSync(flags['output-dir']); } catch (e) { /* may already exist */ }
+      var exported = 0;
+      for (var i = 0; i < pages.length; i++) {
+        var page = pages[i];
+        var fileName = flags['output-dir'] + '/' + page.id + '.json';
+        fs.writeFileSync(fileName, JSON.stringify(page, null, 2));
+        exported++;
+      }
+      cliOutput({ ok: true, exported: exported, spaceId: flags['space-id'], outputDir: flags['output-dir'] }, flags);
+      break;
+    }
+    case 'import': {
+      if (!flags['space-id']) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --space-id' }));
+        exitProcess(4);
+      }
+      if (!flags['input-dir']) {
+        printErr(JSON.stringify({ error: true, code: 4, message: 'Missing required flag: --input-dir' }));
+        exitProcess(4);
+      }
+      var files;
+      try { files = fs.readdirSync(flags['input-dir']); } catch (e) { files = []; }
+      var imported = 0;
+      for (var i = 0; i < files.length; i++) {
+        var file = files[i];
+        if (typeof file === 'object' && file.name) file = file.name;
+        if (String(file).indexOf('.json') === -1) continue;
+        try {
+          var content = fs.readFileSync(flags['input-dir'] + '/' + file, 'utf-8');
+          var pageData = JSON.parse(content);
+          var body = { spaceId: flags['space-id'], title: pageData.title || file, status: 'current' };
+          if (pageData.body) body.body = pageData.body;
+          await confluenceApi('POST', '/pages', body, flags);
+          imported++;
+        } catch (e) {
+          // Skip files that can't be imported
+        }
+      }
+      cliOutput({ ok: true, imported: imported, spaceId: flags['space-id'], inputDir: flags['input-dir'] }, flags);
+      break;
+    }
+    default:
+      printErr(JSON.stringify({ error: true, code: 1, message: 'Unknown bulk action: ' + action }));
+      exitProcess(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Test Runner (MODE=test)
+// ---------------------------------------------------------------------------
+function runTests() {
+  var testName = (globalThis.args || [])[1];
+  if (testName === 'test-base64') {
+    runBase64Tests();
+  } else {
+    print('Unknown test: ' + testName);
+    print('Available tests: test-base64');
+    exitProcess(1);
+  }
+}
+
+function runBase64Tests() {
+  var tests = [
+    ['', ''],
+    ['Hello', 'SGVsbG8='],
+    ['Hello, World!', 'SGVsbG8sIFdvcmxkIQ=='],
+    ['user@example.com:ATATT3xtoken', 'dXNlckBleGFtcGxlLmNvbTpBVEFUVDN4dG9rZW4='],
+    ['A', 'QQ=='],
+    ['AB', 'QUI=']
+  ];
+  var pass = 0;
+  var fail = 0;
+  for (var i = 0; i < tests.length; i++) {
+    var input = tests[i][0];
+    var expected = tests[i][1];
+    var actual = base64Encode(input);
+    if (actual === expected) {
+      print('ok ' + (i + 1) + ' - base64("' + input + '")');
+      pass++;
+    } else {
+      print('not ok ' + (i + 1) + ' - expected ' + expected + ', got ' + actual);
+      fail++;
+    }
+  }
+  print('# Tests: ' + tests.length + ', Pass: ' + pass + ', Fail: ' + fail);
+  exitProcess(fail > 0 ? 1 : 0);
+}
+
+// ---------------------------------------------------------------------------
+// Main CLI Entry Point
+// ---------------------------------------------------------------------------
+async function runCli() {
+  var parsed = parseArgs();
+
+  // Handle --help at top level
+  if (parsed.flags.help && !parsed.resource) {
+    showHelp();
+    exitProcess(0);
+  }
+
+  // No resource → show top-level help
+  if (!parsed.resource) {
+    showHelp();
+    exitProcess(0);
+  }
+
+  // Check for unknown resource
+  if (KNOWN_RESOURCES.indexOf(parsed.resource) === -1) {
+    printErr(JSON.stringify({ error: true, code: 1, message: 'Unknown command: ' + parsed.resource }));
+    exitProcess(1);
+  }
+
+  // Handle resource-level --help
+  if (parsed.flags.help) {
+    showHelp(parsed.resource, parsed.action);
+    exitProcess(0);
+  }
+
+  // Route to resource handler
+  switch (parsed.resource) {
+    case 'auth': await handleAuth(parsed); break;
+    case 'page': await handlePage(parsed); break;
+    case 'space': await handleSpace(parsed); break;
+    case 'search': await handleSearch(parsed); break;
+    case 'comment': await handleComment(parsed); break;
+    case 'label': await handleLabel(parsed); break;
+    case 'version': await handleVersion(parsed); break;
+    case 'attachment': await handleAttachment(parsed); break;
+    case 'property': await handleProperty(parsed); break;
+    case 'bulk': await handleBulk(parsed); break;
+    default:
+      printErr(JSON.stringify({ error: true, code: 1, message: 'Unknown command: ' + parsed.resource }));
+      exitProcess(1);
+  }
+
+  exitProcess(0);
+}
+
+// ---------------------------------------------------------------------------
+// Mode Dispatch
+// ---------------------------------------------------------------------------
+var MODE = (globalThis.env && globalThis.env.MODE) || 'gui';
+var PORT = 8080;
+
+if (MODE === 'cli') {
+  runCli();
+} else if (MODE === 'test') {
+  runTests();
+} else if (MODE === 'gui') {
+  createServer(function(req, resp) {
+    try {
+      route(req, resp);
+    } catch (e) {
+      print('Error handling request:', e);
+      try { json(resp, 500, { error: String(e) }); } catch (_) {}
+    }
+  }).listen(PORT, function() {
+    print('WasmEdge Demo server listening on port ' + PORT);
+    print('Open http://localhost:' + PORT + ' in your browser');
+  });
+} else {
+  printErr(JSON.stringify({ error: true, code: 1, message: 'Invalid MODE: ' + MODE + '. Valid: gui, cli, test' }));
+  exitProcess(1);
+}

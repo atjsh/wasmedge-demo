@@ -146,7 +146,7 @@ unzip modules.zip
 mkdir -p demo-data
 
 # Run the app
-wasmedge --dir .:. --dir ./demo-data:/data wasmedge_quickjs.wasm server.js
+wasmedge --dir .:. --dir /data:./demo-data wasmedge_quickjs.wasm server.js
 ```
 
 Then open `http://localhost:8080`.
@@ -177,9 +177,148 @@ Then open `http://localhost:8080`.
 - Reports uptime and request counters
 - Includes an echo endpoint for request/response testing
 
+## CLI Mode — Confluence Toolkit
+
+The application supports a second operating mode controlled by the `MODE` environment variable. When `MODE=cli`, the HTTP server is not started. Instead, the process runs as a command-line toolkit for the Atlassian Confluence REST API and exits when the command completes.
+
+```bash
+wasmedge --dir .:. --dir /data:./demo-data \
+  --env MODE=cli \
+  wasmedge_quickjs.wasm -- server.js confluence <resource> <action> [flags]
+```
+
+The default mode (`MODE=gui`) starts the HTTP server on port 8080 exactly as described in the sections above. You do not need to set `MODE` at all for the existing browser-based demo.
+
+### Quick Start
+
+1. Store your Confluence credentials:
+
+```bash
+wasmedge --dir .:. --dir /data:./demo-data \
+  --env MODE=cli \
+  wasmedge_quickjs.wasm -- server.js confluence auth login \
+  --site mysite.atlassian.net \
+  --email me@example.com \
+  --token ATATT3x...
+```
+
+Credentials are saved to `/data/auth.json` (host path `./demo-data/auth.json`).
+
+2. Run your first query:
+
+```bash
+wasmedge --dir .:. --dir /data:./demo-data \
+  --env MODE=cli \
+  wasmedge_quickjs.wasm -- server.js confluence space list --pretty
+```
+
+### Command Reference
+
+All commands follow the pattern `confluence <resource> <action> [flags]`.
+
+| Resource | Action | Description | Key Flags |
+| --- | --- | --- | --- |
+| `auth` | `login` | Store credentials to `/data/auth.json` | `--site`, `--email`, `--token` |
+| `page` | `list` | List pages in a space | `--space-id`, `--limit`, `--all` |
+| `page` | `get` | Retrieve a single page | positional page ID, `--pretty` |
+| `page` | `create` | Create a new page | `--space-id`, `--title`, `--body` |
+| `space` | `list` | List spaces | `--limit`, `--all`, `--pretty` |
+| `search` | *(default)* | Search content with CQL | `--cql`, `--limit`, `--all` |
+| `comment` | `list` | List comments on a page | `--page-id`, `--limit` |
+| `label` | `add` | Add labels to a page | `--page-id`, `--label` (comma-separated) |
+| `version` | `list` | List page versions | positional page ID, `--limit` |
+| `attachment` | `list` | List attachments on a page | `--page-id`, `--limit` |
+| `property` | `list` | List content properties | positional page ID |
+| `bulk` | `export` | Export multiple pages | `--space-id`, `--format` |
+
+Pass `--help` to any command to see its full flag list.
+
+### Authentication
+
+Credentials can be provided in two ways. Environment variables take precedence when both are present.
+
+**Environment variables** — useful for CI pipelines and one-off commands:
+
+```bash
+wasmedge --dir .:. --dir /data:./demo-data \
+  --env MODE=cli \
+  --env CONFLUENCE_SITE=mysite.atlassian.net \
+  --env CONFLUENCE_EMAIL=me@example.com \
+  --env CONFLUENCE_TOKEN=ATATT3x... \
+  wasmedge_quickjs.wasm -- server.js confluence page list --space-id 12345
+```
+
+**Stored credentials** — saved once with `auth login` and reused across commands:
+
+```bash
+wasmedge --dir .:. --dir /data:./demo-data \
+  --env MODE=cli \
+  wasmedge_quickjs.wasm -- server.js confluence auth login \
+  --site mysite.atlassian.net \
+  --email me@example.com \
+  --token ATATT3x...
+```
+
+The file is written to `/data/auth.json` inside the container, which maps to `./demo-data/auth.json` on the host.
+
+### Output & Error Handling
+
+All successful output is written to **stdout** as JSON. The default format is compact (single line). Add `--pretty` to any command for indented output.
+
+Errors are written to **stderr** as structured JSON objects with `error` and `message` fields.
+
+| Exit Code | Meaning |
+| --- | --- |
+| `0` | Success |
+| `1` | General / unexpected error |
+| `2` | Authentication error (missing or invalid credentials) |
+| `3` | Not found (page, space, or resource does not exist) |
+| `4` | Validation error (missing required flags or bad input) |
+
+Use `--verbose` on any command to print debug information (request URLs, response status codes) to stderr.
+
+Pagination is supported on list-style commands with `--limit N` to set the page size and `--all` to automatically follow pagination and return every result.
+
+### Docker CLI Mode
+
+You can run CLI commands through Docker Compose or `docker run` by overriding the command and passing `MODE=cli`.
+
+```bash
+docker run --rm \
+  --runtime=io.containerd.wasmedge.v1 \
+  --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  -e CONFLUENCE_SITE=mysite.atlassian.net \
+  -e CONFLUENCE_EMAIL=me@example.com \
+  -e CONFLUENCE_TOKEN=ATATT3x... \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence space list --pretty
+```
+
+Or add a dedicated service to `docker-compose.yml`:
+
+```yaml
+services:
+  confluence-cli:
+    image: ghcr.io/atjsh/wasmedge-demo:latest
+    runtime: io.containerd.wasmedge.v1
+    platform: wasi/wasm
+    volumes:
+      - ./demo-data:/data
+    environment:
+      MODE: cli
+      CONFLUENCE_SITE: mysite.atlassian.net
+      CONFLUENCE_EMAIL: me@example.com
+      CONFLUENCE_TOKEN: ${CONFLUENCE_TOKEN}
+    command: ["confluence", "space", "list", "--pretty"]
+```
+
+Then run with `docker compose run --rm confluence-cli`.
+
 ## Filesystem Model
 
-The File I/O tab is intentionally limited to `/data`. When using Docker Compose or `docker run`, `/data` is backed by `./demo-data`. When using the WasmEdge CLI directly, expose the same directory with `--dir ./demo-data:/data`.
+The File I/O tab is intentionally limited to `/data`. When using Docker Compose or `docker run`, `/data` is backed by `./demo-data`. When using the WasmEdge CLI directly, expose the same directory with `--dir /data:./demo-data`.
 
 The application does not browse arbitrary host paths. Access is limited to the directories explicitly preopened through WASI.
 
