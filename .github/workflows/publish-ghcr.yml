@@ -56,6 +56,8 @@ jobs:
         with:
           context: .
           platforms: wasi/wasm
+          build-args: |
+            ENABLE_AOT=0
           provenance: false
           sbom: false
           push: true

@@ -13,12 +13,13 @@ EOT
 RUN curl -sSf https://raw.githubusercontent.com/WasmEdge/WasmEdge/master/utils/install.sh | bash
 
 FROM buildbase AS build
+ARG ENABLE_AOT=0
 COPY server.js .
 COPY wasmedge-quickjs.lock .
 COPY scripts/sync-wasmedge-quickjs.sh ./scripts/sync-wasmedge-quickjs.sh
 COPY patches/wasmedge-quickjs-http.patch ./patches/wasmedge-quickjs-http.patch
 RUN ./scripts/sync-wasmedge-quickjs.sh
-RUN /root/.wasmedge/bin/wasmedgec wasmedge_quickjs.wasm wasmedge_quickjs.wasm
+RUN if [ "${ENABLE_AOT}" = "1" ]; then /root/.wasmedge/bin/wasmedgec wasmedge_quickjs.wasm wasmedge_quickjs.wasm; fi
 
 FROM scratch
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt

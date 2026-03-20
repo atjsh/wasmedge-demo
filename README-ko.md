@@ -6,8 +6,6 @@
 
 이 저장소는 WasmEdge WebAssembly 컨테이너 내부에서 제공되는 브라우저 기반 GUI 레퍼런스 데모입니다. 애플리케이션은 `wasmedge_quickjs.wasm` 위에서 `server.js`를 실행해 HTTP 서버를 구동하고, 사용자 인터페이스는 인라인 HTML, CSS, JavaScript로 브라우저에 렌더링됩니다.
 
-또한 WasmEdge, Node.js, 네이티브 앱 간의 [비판적 비교(Comparison)](#비교-wasmedge-vs-npm--npx-vs-네이티브-앱) 섹션도 포함하고 있습니다.
-
 이 프로젝트가 보여주려는 "코드서명 불필요" 배포 모델은 다음과 같습니다.
 
 - 네이티브 데스크톱 실행 파일이 없음
@@ -25,13 +23,6 @@
 - WASM 컨테이너 내부에서 수행되는 외부 HTTP 요청
 - 호스트에 매핑된 `/data` 디렉토리 접근과 내부 파일시스템 데모
 - 웹 UI에서 확인할 수 있는 런타임 점검, 요청 로그, echo/debug API
-
-## 실행 요구사항
-
-- Wasm 워크로드를 실행할 수 있도록 준비된 Podman 설치. macOS와 Windows에서는 보통 동작 중인 `podman machine`이 필요합니다. [Podman 설치 가이드](https://podman.io/docs/installation)와 [Podman Desktop Wasm 가이드](https://podman-desktop.io/blog/wasm-workloads-on-macos-and-windows-with-podman)를 참고하세요.
-- 또는 컨테이너가 아닌 경로를 원할 때 사용할 로컬 WasmEdge CLI 설치
-- 파일 I/O 탭을 사용하려면 쓰기 가능한 `demo-data/` 디렉토리 필요
-- 외부 HTTP 데모를 위한 네트워크 연결
 
 ## 비교: WasmEdge vs `npm` / `npx` vs 네이티브 앱
 
@@ -79,80 +70,43 @@
 - `ghcr.io/atjsh/wasmedge-demo:latest`
 - `ghcr.io/atjsh/wasmedge-demo:sha-<git-sha>`
 
-## 실행 방법
+## 빠른 시작
 
-### 옵션 1: 로컬 Podman 스크립트
+처음 실행해볼 때는 이 경로가 가장 쉽습니다.
 
-이 저장소에서 권장하는 기본 로컬 컨테이너 실행 경로입니다.
+### 준비물
 
-```bash
-./scripts/podman-build.sh
-./scripts/podman-run.sh
-```
+- Wasm 워크로드를 실행할 수 있도록 준비된 Podman 설치
+- 파일 I/O 탭용으로 쓸 수 있는 쓰기 가능한 `demo-data/` 디렉토리
+- `http://localhost:8080`에 접속할 브라우저
 
-그다음 `http://localhost:8080`을 엽니다.
+macOS와 Windows에서는 보통 동작 중인 `podman machine`이 필요합니다. [Podman 설치 가이드](https://podman.io/docs/installation)와 [Podman Desktop Wasm 가이드](https://podman-desktop.io/blog/wasm-workloads-on-macos-and-windows-with-podman)를 참고하세요.
 
-스크립트는 다음을 수행합니다.
-
-- `localhost/wasmedge-demo:latest` 이미지를 빌드합니다.
-- GUI를 `http://localhost:8080`에서 실행합니다.
-- 필요하면 `./demo-data`를 만들고 `/data`에 마운트합니다.
-
-```bash
-IMAGE_NAME=localhost/wasmedge-demo:dev ./scripts/podman-build.sh
-HOST_PORT=18080 DATA_DIR="$HOME/wasmedge-demo-data" ./scripts/podman-run.sh
-```
-
-이 보조 스크립트는 macOS/Linux 셸을 대상으로 합니다. Windows에서는 아래와 같은 raw Podman 명령을 직접 사용하세요.
-
-```bash
-podman build --platform=wasi/wasm -t localhost/wasmedge-demo:latest .
-podman run --rm --platform=wasi/wasm -p 8080:8080 \
-  -v "<host-demo-data-path>:/data" \
-  localhost/wasmedge-demo:latest
-```
-
-### 옵션 2: 공개된 GHCR 이미지 실행
-
-로컬 빌드 없이 공개된 이미지를 바로 실행하려면 이 방법을 사용합니다.
+### 1. 로컬 데이터 디렉토리 준비
 
 ```bash
 mkdir -p demo-data
+```
 
+### 2. GHCR 이미지를 Podman으로 직접 실행
+
+```bash
 podman run --rm --platform=wasi/wasm -p 8080:8080 \
   -v "$(pwd)/demo-data:/data" \
   ghcr.io/atjsh/wasmedge-demo:latest
 ```
 
-그다음 `http://localhost:8080`을 엽니다.
+### 3. GUI 열기
 
-### 옵션 3: WasmEdge CLI
-
-```bash
-# WasmEdge 설치
-curl -sSf https://raw.githubusercontent.com/WasmEdge/WasmEdge/master/utils/install.sh | bash
-source "$HOME/.wasmedge/env"
-
-# 고정된 런타임 자산 생성
-./scripts/sync-wasmedge-quickjs.sh
-#
-# 이 스크립트는 ./wasmedge-quickjs.lock 에 고정된 v0.6.1-alpha wasm
-# 릴리스와 소스 tarball 을 내려받고, 두 SHA256 값을 검증한 뒤,
-# 업스트림 태그의 modules/ 트리를 추출하고 이 저장소의 작은
-# modules/http.js 패치를 적용한 다음 modules.zip 을 다시 생성합니다.
-#
-# 생성된 런타임 자산은 의도적으로 gitignore 처리합니다. 이 저장소는
-# 필요한 것이 "생성된 런타임 일부 + 로컬 패치 1개"이기 때문에,
-# git submodule 대신 bootstrap 스크립트를 사용합니다.
-
-# 파일 I/O 데모에 사용할 호스트 디렉토리 생성
-mkdir -p demo-data
-
-# 앱 실행
-wasmedge --dir .:. --dir /data:./demo-data wasmedge_quickjs.wasm server.js
+```text
+http://localhost:8080
 ```
 
-그다음 `http://localhost:8080`을 엽니다.
+### 4. 데모 종료
+
+```text
+`podman run`을 실행한 터미널에서 Ctrl+C를 누르세요.
+```
 
 ## Web UI 참고
 
@@ -163,6 +117,8 @@ wasmedge --dir .:. --dir /data:./demo-data wasmedge_quickjs.wasm server.js
 - `os.type()`, `os.platform()`, `os.arch()`, `os.homedir()`, `os.tmpdir()` 같은 런타임 정보를 표시합니다.
 - 업타임과 argv 등 프로세스 데이터를 보여줍니다.
 - 코드서명 불필요 패키징 모델과 WASI 샌드박스 경계의 목적을 설명합니다.
+- 해보기:
+  첫 번째 탭을 열고 런타임 정보가 정상적으로 로드되는지 확인하세요.
 
 ### HTTP 데모
 
@@ -170,6 +126,10 @@ wasmedge --dir .:. --dir /data:./demo-data wasmedge_quickjs.wasm server.js
 - 임의의 GET, POST, PUT 요청을 지원합니다.
 - `httpbin.org` 빠른 예제 버튼을 제공합니다.
 - 응답 본문과 단순 요청 시간을 표시합니다.
+- 해보기:
+  HTTP 탭에서 내장 예제 버튼 중 하나를 눌러 응답 payload를 확인하세요.
+- 알려진 제한:
+  Podman Wasm 환경에서 hostname 기반 외부 `fetch()`는 아직 조사 중입니다. 같은 요청이 direct WasmEdge CLI에서는 동작하지만 Podman Wasm에서는 hostname resolution 오류로 실패할 수 있습니다.
 
 ### 파일 I/O 데모
 
@@ -177,6 +137,8 @@ wasmedge --dir .:. --dir /data:./demo-data wasmedge_quickjs.wasm server.js
 - 브라우저에서 파일 생성, 읽기, 수정, 삭제를 수행합니다.
 - 파일 메타데이터를 표시하고 WASI preopen 모델을 보여줍니다.
 - 호스트 마운트 `/data`와 WASM 런타임 내부 파일을 비교하는 내부 파일시스템 데모를 포함합니다.
+- 해보기:
+  Files 탭에서 파일을 하나 만들고, 목록 새로고침 후 호스트의 `./demo-data`에도 파일이 생겼는지 확인하세요.
 
 ### 서버 정보
 
@@ -184,15 +146,257 @@ wasmedge --dir .:. --dir /data:./demo-data wasmedge_quickjs.wasm server.js
 - 업타임과 요청 카운터를 보고합니다.
 - 요청/응답 테스트용 echo 엔드포인트를 포함합니다.
 - UI에서 서버 상태를 즉시 새로고침할 수 있습니다.
+- 해보기:
+  Server 탭에서 echo 요청을 보내고 서버 상태를 새로고침해 보세요.
 
 ## CLI 모드 — Confluence 툴킷
 
-이 애플리케이션은 두 가지 모드로 실행할 수 있습니다.
+이 애플리케이션은 `MODE=cli`로 실행하면 HTTP 서버 대신 Atlassian Confluence REST API CLI 툴킷처럼 동작합니다.
 
-- **`MODE=gui`** (기본값): 기존 HTTP 서버 GUI
-- **`MODE=cli`**: Atlassian Confluence REST API CLI 툴킷
+### Podman CLI 준비
 
-`MODE=cli`로 실행하면 HTTP 서버를 시작하지 않고, 명령줄에서 Confluence 페이지, 스페이스, 검색 등을 직접 관리할 수 있습니다.
+- Wasm 지원 Podman
+- `/data`에 마운트할 `./demo-data`
+- 유효한 Confluence 인증 정보
+
+한 번만 준비하세요:
+
+```bash
+mkdir -p demo-data
+```
+
+### 복붙 가능한 CLI 명령
+
+#### auth login
+
+```bash
+podman run --rm --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence auth login \
+  --site mysite.atlassian.net \
+  --email me@example.com \
+  --token ATATT3x...
+```
+
+#### auth status
+
+```bash
+podman run --rm --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence auth status --pretty
+```
+
+#### space list
+
+```bash
+podman run --rm --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  -e CONFLUENCE_SITE=mysite.atlassian.net \
+  -e CONFLUENCE_EMAIL=me@example.com \
+  -e CONFLUENCE_TOKEN=ATATT3x... \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence space list --pretty
+```
+
+#### page list
+
+```bash
+podman run --rm --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  -e CONFLUENCE_SITE=mysite.atlassian.net \
+  -e CONFLUENCE_EMAIL=me@example.com \
+  -e CONFLUENCE_TOKEN=ATATT3x... \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence page list --space-id 12345 --pretty
+```
+
+#### page get
+
+```bash
+podman run --rm --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  -e CONFLUENCE_SITE=mysite.atlassian.net \
+  -e CONFLUENCE_EMAIL=me@example.com \
+  -e CONFLUENCE_TOKEN=ATATT3x... \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence page get 12345 --pretty
+```
+
+#### page create
+
+```bash
+podman run --rm --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  -e CONFLUENCE_SITE=mysite.atlassian.net \
+  -e CONFLUENCE_EMAIL=me@example.com \
+  -e CONFLUENCE_TOKEN=ATATT3x... \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence page create \
+  --space-id 12345 \
+  --title "Demo Page" \
+  --body "<p>Hello from WasmEdge Demo</p>" \
+  --body-format storage \
+  --pretty
+```
+
+#### page update
+
+```bash
+podman run --rm --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  -e CONFLUENCE_SITE=mysite.atlassian.net \
+  -e CONFLUENCE_EMAIL=me@example.com \
+  -e CONFLUENCE_TOKEN=ATATT3x... \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence page update 12345 \
+  --title "Updated Demo Page" \
+  --body "<p>Updated body</p>" \
+  --body-format storage \
+  --version 2 \
+  --pretty
+```
+
+#### search
+
+```bash
+podman run --rm --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  -e CONFLUENCE_SITE=mysite.atlassian.net \
+  -e CONFLUENCE_EMAIL=me@example.com \
+  -e CONFLUENCE_TOKEN=ATATT3x... \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence search --cql 'type=page order by lastmodified desc' --limit 10 --pretty
+```
+
+#### comment list
+
+```bash
+podman run --rm --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  -e CONFLUENCE_SITE=mysite.atlassian.net \
+  -e CONFLUENCE_EMAIL=me@example.com \
+  -e CONFLUENCE_TOKEN=ATATT3x... \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence comment list --page-id 12345 --pretty
+```
+
+#### comment create
+
+```bash
+podman run --rm --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  -e CONFLUENCE_SITE=mysite.atlassian.net \
+  -e CONFLUENCE_EMAIL=me@example.com \
+  -e CONFLUENCE_TOKEN=ATATT3x... \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence comment create \
+  --page-id 12345 \
+  --body "Hello from WasmEdge Demo" \
+  --pretty
+```
+
+#### label list
+
+```bash
+podman run --rm --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  -e CONFLUENCE_SITE=mysite.atlassian.net \
+  -e CONFLUENCE_EMAIL=me@example.com \
+  -e CONFLUENCE_TOKEN=ATATT3x... \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence label list --page-id 12345 --pretty
+```
+
+#### label add
+
+```bash
+podman run --rm --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  -e CONFLUENCE_SITE=mysite.atlassian.net \
+  -e CONFLUENCE_EMAIL=me@example.com \
+  -e CONFLUENCE_TOKEN=ATATT3x... \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence label add --page-id 12345 --label demo --pretty
+```
+
+#### attachment list
+
+```bash
+podman run --rm --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  -e CONFLUENCE_SITE=mysite.atlassian.net \
+  -e CONFLUENCE_EMAIL=me@example.com \
+  -e CONFLUENCE_TOKEN=ATATT3x... \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence attachment list --page-id 12345 --pretty
+```
+
+#### attachment upload
+
+```bash
+podman run --rm --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  -e CONFLUENCE_SITE=mysite.atlassian.net \
+  -e CONFLUENCE_EMAIL=me@example.com \
+  -e CONFLUENCE_TOKEN=ATATT3x... \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence attachment upload --page-id 12345 --file /data/example.txt --pretty
+```
+
+#### attachment download
+
+```bash
+podman run --rm --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  -e CONFLUENCE_SITE=mysite.atlassian.net \
+  -e CONFLUENCE_EMAIL=me@example.com \
+  -e CONFLUENCE_TOKEN=ATATT3x... \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence attachment download ATTACHMENT_ID --output /data/downloaded.bin --pretty
+```
+
+#### bulk export
+
+```bash
+podman run --rm --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  -e CONFLUENCE_SITE=mysite.atlassian.net \
+  -e CONFLUENCE_EMAIL=me@example.com \
+  -e CONFLUENCE_TOKEN=ATATT3x... \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence bulk export --space-id 12345 --output-dir /data/backup --pretty
+```
+
+#### bulk import
+
+```bash
+podman run --rm --platform=wasi/wasm \
+  -v "$(pwd)/demo-data:/data" \
+  -e MODE=cli \
+  -e CONFLUENCE_SITE=mysite.atlassian.net \
+  -e CONFLUENCE_EMAIL=me@example.com \
+  -e CONFLUENCE_TOKEN=ATATT3x... \
+  ghcr.io/atjsh/wasmedge-demo:latest \
+  confluence bulk import --space-id 12345 --input-dir /data/backup --pretty
+```
 
 ### CLI 기능 요약
 
@@ -207,36 +411,6 @@ wasmedge --dir .:. --dir /data:./demo-data wasmedge_quickjs.wasm server.js
 - `property`: content property 목록, 조회, 설정
 - `bulk`: `/data` 기준 JSON 파일 내보내기/가져오기
 - 전역 플래그: `--pretty`, `--verbose`, `--limit`, `--all`, `--help`
-
-### 빠른 시작
-
-먼저 인증 정보를 설정한 뒤 첫 번째 명령을 실행합니다.
-
-```bash
-# 인증
-wasmedge --dir .:. --dir /data:./demo-data --env MODE=cli wasmedge_quickjs.wasm -- server.js confluence auth login --site mysite.atlassian.net --email me@example.com --token ATATT3x...
-
-# 페이지 목록
-wasmedge --dir .:. --dir /data:./demo-data \
-  --env MODE=cli \
-  --env CONFLUENCE_SITE=mysite.atlassian.net \
-  --env CONFLUENCE_EMAIL=me@example.com \
-  --env CONFLUENCE_TOKEN=ATATT3x... \
-  wasmedge_quickjs.wasm -- server.js confluence page list --space-id 12345
-```
-
-### HTTPS / TLS
-
-이 저장소가 고정(pin)한 생성 런타임은 `second-state/wasmedge-quickjs` `v0.6.1-alpha`이며, 새 TLS 지원 네트워크 스택을 포함합니다. Atlassian Cloud 같은 공개 HTTPS 엔드포인트는 로컬 WasmEdge CLI와 Docker 이미지에서 바로 동작해야 합니다.
-
-자체 서명 인증서나 사설 CA 체인을 써야 한다면, PEM 번들을 런타임에 마운트하고 `SSL_CERT_FILE`로 지정하세요.
-
-```bash
-wasmedge --dir .:. --dir /data:./demo-data --dir /etc/ssl:/etc/ssl:readonly \
-  --env MODE=cli \
-  --env SSL_CERT_FILE=/etc/ssl/certs/custom-ca.pem \
-  wasmedge_quickjs.wasm -- server.js confluence space list --pretty
-```
 
 ### 명령어 참조
 
@@ -253,66 +427,68 @@ wasmedge --dir .:. --dir /data:./demo-data --dir /etc/ssl:/etc/ssl:readonly \
 | property | list, get, set | content property 조회/설정 | `--page-id`, `--key`, `--value` |
 | bulk | export, import | JSON 파일 대량 내보내기/가져오기 | `--space-id`, `--output-dir`, `--input-dir` |
 
-### 인증
+## 고급 워크플로
 
-인증 정보는 두 가지 방법으로 제공할 수 있습니다.
+### 로컬 Podman 빌드 / 실행 스크립트
 
-**환경 변수 방식** — 실행 시 환경 변수로 직접 전달합니다.
-
-- `CONFLUENCE_SITE` — Confluence 사이트 (예: `mysite.atlassian.net`)
-- `CONFLUENCE_EMAIL` — Atlassian 계정 이메일
-- `CONFLUENCE_TOKEN` — Atlassian API 토큰
-
-**저장 방식** — `auth login` 명령으로 인증 정보를 로컬에 저장합니다.
+공개 GHCR 이미지를 바로 실행하는 대신 로컬에서 이미지를 빌드하고 싶다면 이 경로를 사용하세요.
 
 ```bash
-wasmedge --dir .:. --dir /data:./demo-data --env MODE=cli \
-  wasmedge_quickjs.wasm -- server.js confluence auth login \
-  --site mysite.atlassian.net --email me@example.com --token ATATT3x...
+./scripts/podman-build.sh
+./scripts/podman-run.sh
 ```
 
-저장된 인증 상태는 `auth status`로 확인하고, `auth logout`으로 삭제할 수 있습니다. 환경 변수가 설정되어 있으면 저장된 인증 정보보다 우선합니다.
-
-### 출력 및 오류 처리
-
-- 모든 명령의 출력은 JSON 형식입니다.
-- 성공 시 종료 코드 `0`을 반환합니다.
-- 오류 발생 시 0이 아닌 종료 코드를 반환하며, 오류 메시지가 JSON으로 stderr에 출력됩니다.
+선택적 오버라이드:
 
 ```bash
-# 출력 예시 — jq로 파싱
-wasmedge --dir .:. --dir /data:./demo-data --env MODE=cli \
-  wasmedge_quickjs.wasm -- server.js confluence page list --space-id 12345 | jq '.results[]'
+IMAGE_NAME=localhost/wasmedge-demo:dev ./scripts/podman-build.sh
+HOST_PORT=18080 DATA_DIR="$HOME/wasmedge-demo-data" ./scripts/podman-run.sh
+ENABLE_AOT=1 IMAGE_NAME=localhost/wasmedge-demo:aot ./scripts/podman-build.sh
 ```
 
-### Podman CLI 모드
+`ENABLE_AOT=1`은 같은 머신에서 성능을 확인하기 위한 로컬 opt-in 용도입니다. AOT 결과물은 호스트 의존적이므로 공개 portable 이미지에는 기본적으로 사용하지 않습니다.
 
-Podman에서 명령을 override하고 `MODE=cli`를 넘겨 CLI 모드를 실행할 수 있습니다.
+이 보조 스크립트는 macOS/Linux 셸을 대상으로 합니다. Windows에서는 아래와 같은 raw Podman 명령을 직접 사용하세요.
 
 ```bash
+podman build --platform=wasi/wasm -t localhost/wasmedge-demo:latest .
+podman run --rm --platform=wasi/wasm -p 8080:8080 \
+  -v "<host-demo-data-path>:/data" \
+  localhost/wasmedge-demo:latest
+```
+
+### WasmEdge CLI 직접 실행
+
+컨테이너가 아닌 경로가 필요하거나, Podman 동작과 direct WasmEdge CLI 동작을 비교하고 싶다면 이 경로를 사용하세요.
+
+```bash
+curl -sSf https://raw.githubusercontent.com/WasmEdge/WasmEdge/master/utils/install.sh | bash
+source "$HOME/.wasmedge/env"
+./scripts/sync-wasmedge-quickjs.sh
 mkdir -p demo-data
-
-podman run --rm --platform=wasi/wasm \
-  -v "$(pwd)/demo-data:/data" \
-  -e MODE=cli \
-  -e CONFLUENCE_SITE=mysite.atlassian.net \
-  -e CONFLUENCE_EMAIL=me@example.com \
-  -e CONFLUENCE_TOKEN=ATATT3x... \
-  ghcr.io/atjsh/wasmedge-demo:latest \
-  confluence space list --pretty
+wasmedge --dir .:. --dir /data:./demo-data wasmedge_quickjs.wasm server.js
 ```
 
-`./scripts/podman-build.sh`로 로컬 이미지를 빌드했다면 `ghcr.io/atjsh/wasmedge-demo:latest` 대신 `localhost/wasmedge-demo:latest`를 사용하면 됩니다.
+### HTTPS / TLS
 
-컨테이너 이미지에는 `/etc/ssl/certs/ca-certificates.crt`가 포함되고 `SSL_CERT_FILE`이 자동으로 설정되므로, 공개 HTTPS 엔드포인트에는 추가 마운트가 필요하지 않습니다. 커스텀 CA 번들이 필요할 때만 `SSL_CERT_FILE`을 덮어쓰면 됩니다.
+이 저장소가 고정(pin)한 생성 런타임은 `second-state/wasmedge-quickjs` `v0.6.1-alpha`이며, 새 TLS 지원 네트워크 스택을 포함합니다. Atlassian Cloud 같은 공개 HTTPS 엔드포인트는 런타임이 지원하는 경우 direct WasmEdge CLI와 컨테이너 이미지에서 동작해야 합니다.
 
-## 파일시스템 모델
+자체 서명 인증서나 사설 CA 체인을 써야 한다면, PEM 번들을 런타임에 마운트하고 `SSL_CERT_FILE`로 지정하세요.
 
-파일 I/O 탭은 의도적으로 `/data`에만 접근합니다. Podman을 사용할 때 `/data`는 `./demo-data`에 연결됩니다. WasmEdge CLI를 직접 사용할 때도 동일한 디렉토리를 `--dir ./demo-data:/data`로 노출해야 합니다.
+```bash
+wasmedge --dir .:. --dir /data:./demo-data --dir /etc/ssl:/etc/ssl:readonly \
+  --env MODE=cli \
+  --env SSL_CERT_FILE=/etc/ssl/certs/custom-ca.pem \
+  wasmedge_quickjs.wasm -- server.js confluence space list --pretty
+```
+
+### 파일시스템 모델
+
+파일 I/O 탭은 의도적으로 `/data`에만 접근합니다. Podman을 사용할 때 `/data`는 `./demo-data`에 연결됩니다. WasmEdge CLI를 직접 사용할 때도 동일한 디렉토리를 `--dir /data:./demo-data`로 노출해야 합니다.
 
 애플리케이션은 임의의 호스트 경로를 탐색하지 않습니다. 접근 가능한 범위는 WASI를 통해 명시적으로 preopen한 디렉토리로 제한됩니다.
 
-## 아키텍처
+### 아키텍처
 
 ```text
 브라우저 (http://localhost:8080)
@@ -335,7 +511,7 @@ WASI preopen
     +-- /data         (호스트에 매핑된 demo-data 디렉토리)
 ```
 
-## 이미지 빌드
+### 이미지 빌드
 
 ```bash
 ./scripts/podman-build.sh
@@ -351,12 +527,16 @@ Dockerfile은 다음과 같은 간결한 multi-stage 흐름을 따릅니다.
 
 1. build stage에서 WasmEdge를 설치합니다.
 2. `./wasmedge-quickjs.lock` 에 고정된 URL과 SHA256 값을 사용해 `./scripts/sync-wasmedge-quickjs.sh` 를 실행합니다.
-3. `wasmedgec`로 AOT 컴파일을 적용합니다.
+3. `ENABLE_AOT=1`일 때만 `wasmedgec`로 선택적 AOT 컴파일을 적용합니다.
 4. 최종 `scratch` 이미지에는 런타임, `server.js`, `modules/`, CA 번들을 복사합니다.
 
 이 저장소는 생성된 런타임 자산을 커밋하지 않습니다. 로컬 WasmEdge CLI 준비와 Podman 빌드 모두 같은 bootstrap 스크립트를 사용합니다.
 
-## CI/CD 데모
+공개 GHCR 이미지는 `ENABLE_AOT=0`으로 빌드되어 `latest`가 portable 하게 유지됩니다. `ENABLE_AOT=1`은 이미지를 실행할 동일한 머신에서의 로컬 빌드에만 사용하세요.
+
+## 기타 문서
+
+### CI/CD 데모
 
 이 저장소에는 `.github/workflows/publish-ghcr.yml` GitHub Actions 워크플로가 포함됩니다.
 
@@ -395,15 +575,15 @@ docker buildx imagetools create \
   "ghcr.io/atjsh/wasmedge-demo:${SHA_TAG}"
 ```
 
-## 참고 사항 및 제한
+### 참고 사항 및 제한
 
 - GUI는 브라우저를 통해 제공되며, 이 프로젝트는 네이티브 OS 창을 생성하지 않습니다.
 - 이 저장소의 기본 레지스트리 대상은 GHCR입니다: `ghcr.io/atjsh/wasmedge-demo`
 - GHCR에서는 패키지 접근 권한과 공개 가시성이 별도로 관리되므로, 첫 publish 이후 공개 상태를 다시 확인해야 합니다.
-- 공개 HTTPS 엔드포인트는 기본 설정으로 동작해야 하며, 커스텀 인증서를 쓸 때만 별도 `SSL_CERT_FILE` 설정이 필요합니다.
+- 공개 HTTPS 동작은 WasmEdge 런타임 환경에 따라 달라질 수 있으며, 추가 TLS 지원이 필요할 수 있습니다.
 - `demo-data/`는 수정 가능한 호스트 마운트 저장소이므로 버전 관리에 포함하지 않습니다.
 
-## 기술 참고 자료
+### 기술 참고 자료
 
 - [WasmEdge 문서](https://wasmedge.org/docs/)
 - [WasmEdge QuickJS](https://github.com/second-state/wasmedge-quickjs)

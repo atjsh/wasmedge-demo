@@ -16,5 +16,12 @@ resolve_podman() {
 
 PODMAN_BIN="$(resolve_podman)"
 IMAGE_NAME="${IMAGE_NAME:-localhost/wasmedge-demo:latest}"
+ENABLE_AOT="${ENABLE_AOT:-0}"
 
-exec "${PODMAN_BIN}" build --platform=wasi/wasm -t "${IMAGE_NAME}" "${ROOT_DIR}"
+# ENABLE_AOT=1 is intended for local same-machine builds only.
+# Published portable images should keep ENABLE_AOT=0.
+exec "${PODMAN_BIN}" build \
+  --platform=wasi/wasm \
+  --build-arg "ENABLE_AOT=${ENABLE_AOT}" \
+  -t "${IMAGE_NAME}" \
+  "${ROOT_DIR}"
