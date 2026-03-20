@@ -6,6 +6,8 @@
 
 이 저장소는 WasmEdge WebAssembly 컨테이너 내부에서 제공되는 브라우저 기반 GUI 레퍼런스 데모입니다. 애플리케이션은 `wasmedge_quickjs.wasm` 위에서 `server.js`를 실행해 HTTP 서버를 구동하고, 사용자 인터페이스는 인라인 HTML, CSS, JavaScript로 브라우저에 렌더링됩니다.
 
+또한 WasmEdge, Node.js, 네이티브 앱 간의 [비판적 비교(Comparison)](#비교-wasmedge-vs-npm--npx-vs-네이티브-앱) 섹션도 포함하고 있습니다.
+
 이 프로젝트가 보여주려는 "코드서명 불필요" 배포 모델은 다음과 같습니다.
 
 - 네이티브 데스크톱 실행 파일이 없음
@@ -38,8 +40,8 @@
 | 항목 | WasmEdge / OCI 앱 | Node.js + `npm` / `npx` 앱 | 네이티브 OS 앱 |
 | --- | --- | --- | --- |
 | 배포 단위 | GHCR 같은 레지스트리에서 가져오는 OCI/WASM 이미지 | npm 레지스트리에서 가져오는 패키지 | OS별 바이너리, 압축 파일, 또는 설치 프로그램 |
-| 이 저장소 기준 측정 예시 | 현재 공개 이미지는 약 `2.0 MiB`, 앱 payload는 단일 `31 KiB` `server.js`, 최종 이미지는 `scratch` 기반 | 이 저장소에서는 직접 측정하지 않았음. 패키지 자체는 작을 수 있지만, Node.js 런타임이 미리 설치되어 있어야 함 | 이 저장소에서는 직접 측정하지 않았음. 단일 바이너리로 만들 수는 있지만, 보통 OS/아키텍처별로 별도 산출물이 필요함 |
-| 대상 머신 요구사항 | Wasm 지원 Docker Desktop 또는 WasmEdge CLI 설치 | 동작하는 Node.js + npm 환경 | 플랫폼별 설치 또는 다운로드 절차 |
+| 실측 사례 (본 저장소 기준) | **~2.0 MiB** 이미지 (`scratch` 기반)<br>**31 KiB** 앱 로직 (`server.js`) | 측정하지 않음 (Node.js 런타임 선행 설치 필요) | 측정하지 않음 (보통 OS/아키텍처별 별도 자산 필요) |
+| 실행 환경 요구사항 | Wasm 지원 Docker Desktop 또는 WasmEdge CLI 설치 | 동작하는 Node.js + npm 환경 | 플랫폼별 설치 또는 다운로드 절차 |
 | 버전 관리 | OCI 태그와 digest로 pinning, promotion, rollback을 명시적으로 다루기 쉬움 | semver는 익숙하지만, `npx` 역시 버전을 명확히 pin하지 않으면 npm 해석 결과에 의존함 | 대체로 release asset, installer, 앱별 업데이트 채널에 의존 |
 | 언어 확장성 | WasmEdge 문서는 Rust, JavaScript, Go, Python 기반 앱 개발 경로를 강조하며, C/C++, Swift, AssemblyScript, Kotlin 등에서 컴파일한 표준 Wasm도 실행 가능하다고 설명함 | JavaScript/TypeScript에는 매우 강하지만, 다른 언어는 보통 바인딩이나 외부 프로세스로 연결됨 | 선택한 네이티브 스택에 따라 다르지만, 시간이 갈수록 플랫폼 종속성이 커지는 경우가 많음 |
 | 격리 모델 | WASI preopen을 통한 명시적 호스트 접근과 샌드박스 실행 | 별도 샌드박싱을 하지 않으면 일반 Node.js 프로세스 권한으로 실행 | 보통 가장 깊은 OS 접근 권한과 통합 면을 가짐 |
@@ -230,12 +232,17 @@ Dockerfile은 다음과 같은 간결한 multi-stage 흐름을 따릅니다.
 
 GitHub 호스팅 Linux 러너에서는 `wasi/wasm` 이미지를 직접 `docker pull` 할 때 `operating system is not supported` 오류가 발생하므로, CI 검증은 런타임 pull 대신 익명 매니페스트 확인 방식으로 수행합니다.
 
-### 수동 대체 publish 방법
+### 수동 대체 배포 (Manual fallback publish)
 
-GitHub Actions 대신 로컬 셸에서 직접 publish하려면 먼저 GitHub CLI 인증에 `write:packages` 스코프를 추가해야 합니다.
+GitHub Actions 대신 로컬 셸에서 직접 배포(publish)하려면, 먼저 GitHub CLI 인증 상태를 확인하세요. `write:packages` 스코프가 없다면 갱신해야 합니다.
 
 ```bash
 gh auth refresh -s write:packages
+```
+
+그 후 로그인하고 배포합니다.
+
+```bash
 echo "$(gh auth token)" | docker login ghcr.io -u atjsh --password-stdin
 
 SHA_TAG="sha-$(git rev-parse --short=12 HEAD)"

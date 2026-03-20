@@ -6,6 +6,8 @@
 
 This repository contains a reference demo of a browser-based GUI served from inside a WasmEdge WebAssembly container. The application runs on `wasmedge_quickjs.wasm`, exposes an HTTP server from `server.js`, and renders its interface in the browser with inline HTML, CSS, and JavaScript.
 
+It also includes a [critical comparison](#comparison-wasmedge-vs-npm--npx-vs-native-apps) between WasmEdge, Node.js, and native apps.
+
 The project is meant to demonstrate a "codesign-free" delivery model:
 
 - no native desktop executable
@@ -38,7 +40,7 @@ The current published WasmEdge artifact for this repository is about `2.0 MiB` w
 | Aspect | WasmEdge / OCI app | Node.js + `npm` / `npx` app | Native OS app |
 | --- | --- | --- | --- |
 | Delivery unit | OCI/WASM image from a registry such as GHCR | Package from the npm registry | Platform-specific binary, archive, or installer |
-| Measured example in this repo | Current published image is about `2.0 MiB`; app payload is a single `31 KiB` `server.js`; final image is `scratch`-based | Not measured in this repo; package payload can be small, but it assumes a preinstalled Node.js runtime | Not measured in this repo; can be a single binary, but usually requires separate assets per OS and architecture |
+| Measured example in this repo | **~2.0 MiB** image (scratch base)<br>**31 KiB** app payload (`server.js`) | Not measured here; assumes preinstalled Node.js runtime | Not measured here; usually requires separate assets per OS/arch |
 | Target prerequisites | Docker Desktop with Wasm support, or a WasmEdge CLI install | A working Node.js + npm environment | Per-platform install or download flow |
 | Version management | OCI tags and digests make pinning and rollback explicit | Semver is familiar, but `npx` still relies on npm resolution behavior unless versions are pinned carefully | Usually handled through release assets, installers, and app-specific update channels |
 | Language story | WasmEdge docs highlight app development in Rust, JavaScript, Go, and Python, plus standard Wasm compiled from languages such as C/C++, Swift, AssemblyScript, and Kotlin | Excellent for JavaScript and TypeScript; other languages usually enter through bindings or external processes | Depends on the chosen native stack, but often becomes more platform-specific over time |
@@ -232,10 +234,15 @@ GitHub-hosted Linux runners cannot directly `docker pull` `wasi/wasm` images and
 
 ### Manual fallback publish
 
-If you want to publish from a local shell instead of GitHub Actions, refresh your GitHub CLI auth first so it includes `write:packages`.
+If you want to publish from a local shell instead of GitHub Actions, check your GitHub CLI auth first. If it lacks `write:packages`, refresh it:
 
 ```bash
 gh auth refresh -s write:packages
+```
+
+Then login and publish:
+
+```bash
 echo "$(gh auth token)" | docker login ghcr.io -u atjsh --password-stdin
 
 SHA_TAG="sha-$(git rev-parse --short=12 HEAD)"
