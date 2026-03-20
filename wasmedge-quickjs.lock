@@ -1,0 +1,7 @@
+# Pinned upstream inputs for generated WasmEdge QuickJS runtime assets.
+WASMEDGE_QUICKJS_VERSION='v0.6.1-alpha'
+WASMEDGE_QUICKJS_WASM_URL='https://github.com/second-state/wasmedge-quickjs/releases/download/v0.6.1-alpha/wasmedge_quickjs.wasm'
+WASMEDGE_QUICKJS_WASM_SHA256='f2ab2cbe8af148ab1b2613c3d9d62d6dd98a52475272226b35e0894a04dde3e2'
+WASMEDGE_QUICKJS_SOURCE_URL='https://github.com/second-state/wasmedge-quickjs/archive/refs/tags/v0.6.1-alpha.tar.gz'
+WASMEDGE_QUICKJS_SOURCE_SHA256='a073e0849c20365ca7748332285c9c40d367877d6415c2a40c1d35791b588501'
+WASMEDGE_QUICKJS_SOURCE_ROOT='wasmedge-quickjs-0.6.1-alpha'

@@ -137,10 +137,17 @@ Then open `http://localhost:8080`.
 curl -sSf https://raw.githubusercontent.com/WasmEdge/WasmEdge/master/utils/install.sh | bash
 source "$HOME/.wasmedge/env"
 
-# Download the QuickJS runtime and compatibility modules
-curl -OL https://github.com/second-state/wasmedge-quickjs/releases/download/v0.5.0-alpha/wasmedge_quickjs.wasm
-curl -OL https://github.com/second-state/wasmedge-quickjs/releases/download/v0.5.0-alpha/modules.zip
-unzip modules.zip
+# Bootstrap the pinned runtime assets
+./scripts/sync-wasmedge-quickjs.sh
+#
+# The script downloads the pinned v0.6.1-alpha wasm release and source tarball
+# listed in ./wasmedge-quickjs.lock, verifies both SHA256 values, extracts the
+# matching modules/ tree from the upstream tag, applies this repo's small
+# modules/http.js patch, and regenerates modules.zip.
+#
+# Generated runtime assets are intentionally gitignored. This repo uses a
+# bootstrap script instead of a git submodule because it only needs a generated
+# runtime subset plus one local patch.
 
 # Create the host directory used by the file I/O demo
 mkdir -p demo-data
@@ -209,6 +216,19 @@ Credentials are saved to `/data/auth.json` (host path `./demo-data/auth.json`).
 ```bash
 wasmedge --dir .:. --dir /data:./demo-data \
   --env MODE=cli \
+  wasmedge_quickjs.wasm -- server.js confluence space list --pretty
+```
+
+### HTTPS / TLS
+
+The generated runtime is pinned to `second-state/wasmedge-quickjs` `v0.6.1-alpha`, which includes the newer TLS-enabled networking stack. Public HTTPS endpoints such as Atlassian Cloud should work directly in local WasmEdge CLI runs and in the Docker image.
+
+For custom or self-signed certificate chains, point `SSL_CERT_FILE` at a PEM bundle that is mounted into the runtime:
+
+```bash
+wasmedge --dir .:. --dir /data:./demo-data --dir /etc/ssl:/etc/ssl:readonly \
+  --env MODE=cli \
+  --env SSL_CERT_FILE=/etc/ssl/certs/custom-ca.pem \
   wasmedge_quickjs.wasm -- server.js confluence space list --pretty
 ```
 
@@ -316,6 +336,8 @@ services:
 
 Then run with `docker compose run --rm confluence-cli`.
 
+The container image bundles `/etc/ssl/certs/ca-certificates.crt` and sets `SSL_CERT_FILE` automatically, so public HTTPS endpoints do not need extra mounts. Override `SSL_CERT_FILE` only when you need a custom CA bundle.
+
 ## Filesystem Model
 
 The File I/O tab is intentionally limited to `/data`. When using Docker Compose or `docker run`, `/data` is backed by `./demo-data`. When using the WasmEdge CLI directly, expose the same directory with `--dir /data:./demo-data`.
@@ -354,9 +376,11 @@ docker buildx build --platform wasi/wasm -t wasmedge-demo:latest .
 The Dockerfile follows a compact multi-stage flow:
 
 1. install WasmEdge in the build stage
-2. download `wasmedge_quickjs.wasm` and `modules.zip`
+2. run `./scripts/sync-wasmedge-quickjs.sh` using the pinned URLs and SHA256 values in `./wasmedge-quickjs.lock`
 3. apply AOT compilation with `wasmedgec`
-4. copy only the runtime, `server.js`, and `modules/` into a `scratch` image
+4. copy the runtime, `server.js`, `modules/`, and a CA bundle into a `scratch` image
+
+This repository does not commit generated runtime assets. The same bootstrap script is used for local WasmEdge CLI setup and for Docker builds.
 
 ## CI/CD Demo
 

@@ -43,11 +43,34 @@ function text(resp, code, body, contentType) {
   resp.end(body);
 }
 
+function chunkToString(chunk) {
+  if (chunk === undefined || chunk === null) return '';
+  if (typeof chunk === 'string') return chunk;
+
+  function bytesToString(bytes) {
+    let out = '';
+    for (let i = 0; i < bytes.length; i++) out += String.fromCharCode(bytes[i]);
+    return out;
+  }
+
+  if (typeof ArrayBuffer !== 'undefined') {
+    if (chunk instanceof ArrayBuffer) {
+      return bytesToString(new Uint8Array(chunk));
+    }
+    if (ArrayBuffer.isView && ArrayBuffer.isView(chunk)) {
+      return bytesToString(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+    }
+  }
+  return String(chunk);
+}
+
 function collectBody(req) {
   return new Promise((resolve) => {
     let body = '';
-    req.on('data', (chunk) => { body += chunk; });
+    req.on('data', (chunk) => { body += chunkToString(chunk); });
     req.on('end', () => resolve(body));
+    req.on('error', () => resolve(body));
+    try { if (typeof req.resume === 'function') req.resume(); } catch (_) {}
   });
 }
 
@@ -1061,7 +1084,23 @@ async function confluenceApi(method, path, body, flags) {
   var fetchOpts = { method: method, headers: headers };
   if (body) fetchOpts.body = JSON.stringify(body);
 
-  var resp = await fetch(url, fetchOpts);
+  var resp;
+  try {
+    resp = await fetch(url, fetchOpts);
+  } catch (e) {
+    var errorMessage = String(e);
+    var errorBody = {
+      error: true,
+      code: 1,
+      message: 'Network request failed: ' + errorMessage,
+      url: url
+    };
+    if (errorMessage.indexOf('Illegal response') !== -1) {
+      errorBody.hint = 'The WasmEdge QuickJS fetch runtime rejected the HTTP response before JSON parsing completed.';
+    }
+    printErr(JSON.stringify(errorBody));
+    exitProcess(1);
+  }
   var data;
   try {
     data = await resp.json();
@@ -1106,7 +1145,23 @@ async function confluenceRawFetch(method, path, flags) {
     printErr(JSON.stringify({ debug: true, request: { method: method, url: url } }));
   }
 
-  var resp = await fetch(url, { method: method, headers: headers });
+  var resp;
+  try {
+    resp = await fetch(url, { method: method, headers: headers });
+  } catch (e) {
+    var errorMessage = String(e);
+    var errorBody = {
+      error: true,
+      code: 1,
+      message: 'Network request failed: ' + errorMessage,
+      url: url
+    };
+    if (errorMessage.indexOf('Illegal response') !== -1) {
+      errorBody.hint = 'The WasmEdge QuickJS fetch runtime rejected the HTTP response before the body could be read.';
+    }
+    printErr(JSON.stringify(errorBody));
+    exitProcess(1);
+  }
 
   if (resp.status === 401 || resp.status === 403) {
     printErr(JSON.stringify({ error: true, code: 2, message: 'Authentication failed' }));

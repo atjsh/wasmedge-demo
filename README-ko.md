@@ -137,16 +137,23 @@ docker run --rm -p 8080:8080 \
 curl -sSf https://raw.githubusercontent.com/WasmEdge/WasmEdge/master/utils/install.sh | bash
 source "$HOME/.wasmedge/env"
 
-# QuickJS 런타임과 호환 모듈 다운로드
-curl -OL https://github.com/second-state/wasmedge-quickjs/releases/download/v0.5.0-alpha/wasmedge_quickjs.wasm
-curl -OL https://github.com/second-state/wasmedge-quickjs/releases/download/v0.5.0-alpha/modules.zip
-unzip modules.zip
+# 고정된 런타임 자산 생성
+./scripts/sync-wasmedge-quickjs.sh
+#
+# 이 스크립트는 ./wasmedge-quickjs.lock 에 고정된 v0.6.1-alpha wasm
+# 릴리스와 소스 tarball 을 내려받고, 두 SHA256 값을 검증한 뒤,
+# 업스트림 태그의 modules/ 트리를 추출하고 이 저장소의 작은
+# modules/http.js 패치를 적용한 다음 modules.zip 을 다시 생성합니다.
+#
+# 생성된 런타임 자산은 의도적으로 gitignore 처리합니다. 이 저장소는
+# 필요한 것이 "생성된 런타임 일부 + 로컬 패치 1개"이기 때문에,
+# git submodule 대신 bootstrap 스크립트를 사용합니다.
 
 # 파일 I/O 데모에 사용할 호스트 디렉토리 생성
 mkdir -p demo-data
 
 # 앱 실행
-wasmedge --dir .:. --dir ./demo-data:/data wasmedge_quickjs.wasm server.js
+wasmedge --dir .:. --dir /data:./demo-data wasmedge_quickjs.wasm server.js
 ```
 
 그다음 `http://localhost:8080`을 엽니다.
@@ -201,6 +208,19 @@ wasmedge --dir .:. --dir /data:./demo-data \
   --env CONFLUENCE_EMAIL=me@example.com \
   --env CONFLUENCE_TOKEN=ATATT3x... \
   wasmedge_quickjs.wasm -- server.js confluence page list --space-id 12345
+```
+
+### HTTPS / TLS
+
+이 저장소가 고정(pin)한 생성 런타임은 `second-state/wasmedge-quickjs` `v0.6.1-alpha`이며, 새 TLS 지원 네트워크 스택을 포함합니다. Atlassian Cloud 같은 공개 HTTPS 엔드포인트는 로컬 WasmEdge CLI와 Docker 이미지에서 바로 동작해야 합니다.
+
+자체 서명 인증서나 사설 CA 체인을 써야 한다면, PEM 번들을 런타임에 마운트하고 `SSL_CERT_FILE`로 지정하세요.
+
+```bash
+wasmedge --dir .:. --dir /data:./demo-data --dir /etc/ssl:/etc/ssl:readonly \
+  --env MODE=cli \
+  --env SSL_CERT_FILE=/etc/ssl/certs/custom-ca.pem \
+  wasmedge_quickjs.wasm -- server.js confluence space list --pretty
 ```
 
 ### 명령어 참조
@@ -276,6 +296,8 @@ services:
 CONFLUENCE_TOKEN=ATATT3x... docker compose run --rm cli
 ```
 
+컨테이너 이미지에는 `/etc/ssl/certs/ca-certificates.crt`가 포함되고 `SSL_CERT_FILE`이 자동으로 설정되므로, 공개 HTTPS 엔드포인트에는 추가 마운트가 필요하지 않습니다. 커스텀 CA 번들이 필요할 때만 `SSL_CERT_FILE`을 덮어쓰면 됩니다.
+
 ## 파일시스템 모델
 
 파일 I/O 탭은 의도적으로 `/data`에만 접근합니다. Docker Compose 또는 `docker run`을 사용할 때 `/data`는 `./demo-data`에 연결됩니다. WasmEdge CLI를 직접 사용할 때도 동일한 디렉토리를 `--dir ./demo-data:/data`로 노출해야 합니다.
@@ -314,9 +336,11 @@ docker buildx build --platform wasi/wasm -t wasmedge-demo:latest .
 Dockerfile은 다음과 같은 간결한 multi-stage 흐름을 따릅니다.
 
 1. build stage에서 WasmEdge를 설치합니다.
-2. `wasmedge_quickjs.wasm`과 `modules.zip`을 다운로드합니다.
+2. `./wasmedge-quickjs.lock` 에 고정된 URL과 SHA256 값을 사용해 `./scripts/sync-wasmedge-quickjs.sh` 를 실행합니다.
 3. `wasmedgec`로 AOT 컴파일을 적용합니다.
-4. 최종 `scratch` 이미지에는 런타임, `server.js`, `modules/`만 복사합니다.
+4. 최종 `scratch` 이미지에는 런타임, `server.js`, `modules/`, CA 번들을 복사합니다.
+
+이 저장소는 생성된 런타임 자산을 커밋하지 않습니다. 로컬 WasmEdge CLI 준비와 Docker 빌드 모두 같은 bootstrap 스크립트를 사용합니다.
 
 ## CI/CD 데모
 
@@ -362,7 +386,7 @@ docker buildx imagetools create \
 - GUI는 브라우저를 통해 제공되며, 이 프로젝트는 네이티브 OS 창을 생성하지 않습니다.
 - 이 저장소의 기본 레지스트리 대상은 GHCR입니다: `ghcr.io/atjsh/wasmedge-demo`
 - GHCR에서는 패키지 접근 권한과 공개 가시성이 별도로 관리되므로, 첫 publish 이후 공개 상태를 다시 확인해야 합니다.
-- 외부 HTTPS 동작은 WasmEdge 런타임 환경에 따라 달라질 수 있으며 추가 TLS 지원이 필요할 수 있습니다.
+- 공개 HTTPS 엔드포인트는 기본 설정으로 동작해야 하며, 커스텀 인증서를 쓸 때만 별도 `SSL_CERT_FILE` 설정이 필요합니다.
 - `demo-data/`는 수정 가능한 호스트 마운트 저장소이므로 버전 관리에 포함하지 않습니다.
 
 ## 기술 참고 자료

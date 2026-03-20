@@ -1,4 +1,15 @@
+# Local mutable data used by the demo/CLI auth flow
 demo-data/
+
+# Generated WasmEdge QuickJS runtime assets
 modules/
-wasmedge_quickjs.wasm
 modules.zip
+wasmedge_quickjs.wasm
+
+# Temporary files created during local testing
+tmp_demo_*.txt
+
+# macOS / editor noise
+.DS_Store
+*.swp
+*.swo
