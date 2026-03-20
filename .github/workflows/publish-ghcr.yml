@@ -41,6 +41,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -55,7 +58,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: wasi/wasm
+          platforms: linux/amd64,linux/arm64
           build-args: |
             ENABLE_AOT=0
           provenance: false
@@ -64,7 +67,7 @@ jobs:
           tags: ${{ needs.metadata.outputs.image_name }}:${{ needs.metadata.outputs.sha_tag }}
           labels: |
             org.opencontainers.image.title=wasmedge-demo
-            org.opencontainers.image.description=Reference demo of a codesign-free browser-based GUI served from a WasmEdge WebAssembly container
+            org.opencontainers.image.description=Reference demo of a codesign-free browser-based GUI served from an OCI image with an embedded WasmEdge runtime
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
 

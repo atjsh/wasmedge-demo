@@ -21,7 +21,7 @@ DATA_DIR="${DATA_DIR:-${ROOT_DIR}/demo-data}"
 
 mkdir -p "${DATA_DIR}"
 
-exec "${PODMAN_BIN}" run --rm --platform=wasi/wasm \
+exec "${PODMAN_BIN}" run --rm \
   -p "${HOST_PORT}:8080" \
   -v "${DATA_DIR}:/data" \
   "${IMAGE_NAME}"

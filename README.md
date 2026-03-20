@@ -4,23 +4,23 @@
 
 ## Overview
 
-This repository contains a reference demo of a browser-based GUI served from inside a WasmEdge WebAssembly container. The application runs on `wasmedge_quickjs.wasm`, exposes an HTTP server from `server.js`, and renders its interface in the browser with inline HTML, CSS, and JavaScript.
+This repository contains a reference demo of a browser-based GUI served from inside a regular OCI container image that embeds the WasmEdge runtime. The application runs on `wasmedge_quickjs.wasm` through `wasmedge`, exposes an HTTP server from `server.js`, and renders its interface in the browser with inline HTML, CSS, and JavaScript.
 
 The project is meant to demonstrate a "codesign-free" delivery model:
 
 - no native desktop executable
 - no OS-specific GUI toolkit
 - no platform-specific code-signing or notarization flow
-- a standard OCI/WASM runtime launch process
+- a standard OCI container launch process
 
-In practice, the user runs a container and opens `http://localhost:8080`. The browser becomes the GUI surface, while WasmEdge and WASI provide the runtime and sandbox boundary.
+In practice, the user runs a container and opens `http://localhost:8080`. The browser becomes the GUI surface, while WasmEdge and WASI provide the runtime and sandbox boundary inside the container.
 
 ## What the Demo Covers
 
 - A single-file JavaScript HTTP server running on WasmEdge QuickJS
 - A default browser GUI with four tabs: Runtime, HTTP, Files, and Server
 - A second `MODE=cli` execution path for the bundled Confluence toolkit
-- Outbound HTTP requests initiated from inside the WASM container
+- Outbound HTTP requests initiated from inside the embedded WasmEdge runtime
 - File access through a host-mapped `/data` directory plus an internal filesystem demo
 - Runtime inspection, request logging, and echo/debug endpoints exposed through the web UI
 
@@ -28,13 +28,13 @@ In practice, the user runs a container and opens `http://localhost:8080`. The br
 
 This demo uses WasmEdge because it changes the delivery model, not because it is automatically better than every Node.js or native approach.
 
-The current published WasmEdge artifact for this repository is about `2.0 MiB` when pulled locally, and the application logic itself is a single `31 KiB` `server.js`. That is a real advantage for this particular demo, but it should be compared against the right alternatives and with the right caveats.
+The current packaging for this repository is a regular OCI image that embeds the WasmEdge runtime, the generated QuickJS runtime, and the JavaScript app. That trades some size for compatibility with mainstream container tooling while still hiding the internal runtime files from end users.
 
 | Aspect | WasmEdge / OCI app | Node.js + `npm` / `npx` app | Native OS app |
 | --- | --- | --- | --- |
-| Delivery unit | OCI/WASM image from a registry such as GHCR | Package from the npm registry | Platform-specific binary, archive, or installer |
-| Measured example in this repo | **~2.0 MiB** image (scratch base)<br>**31 KiB** app payload (`server.js`) | Not measured here; assumes preinstalled Node.js runtime | Not measured here; usually requires separate assets per OS/arch |
-| Target prerequisites | Podman with Wasm support, or a WasmEdge CLI install | A working Node.js + npm environment | Per-platform install or download flow |
+| Delivery unit | Regular OCI image from a registry such as GHCR, with an embedded WasmEdge runtime | Package from the npm registry | Platform-specific binary, archive, or installer |
+| Measured example in this repo | **~145 MiB** local arm64 Podman image with embedded WasmEdge, QuickJS runtime, modules, and `netbase` | Not measured here; assumes preinstalled Node.js runtime | Not measured here; usually requires separate assets per OS/arch |
+| Target prerequisites | Podman or Docker with normal Linux container support, or a direct WasmEdge CLI install | A working Node.js + npm environment | Per-platform install or download flow |
 | Version management | OCI tags and digests make pinning and rollback explicit | Semver is familiar, but `npx` still relies on npm resolution behavior unless versions are pinned carefully | Usually handled through release assets, installers, and app-specific update channels |
 | Language story | WasmEdge docs highlight app development in Rust, JavaScript, Go, and Python, plus standard Wasm compiled from languages such as C/C++, Swift, AssemblyScript, and Kotlin | Excellent for JavaScript and TypeScript; other languages usually enter through bindings or external processes | Depends on the chosen native stack, but often becomes more platform-specific over time |
 | Isolation model | Sandboxed runtime with explicit WASI preopens and controlled host access | Runs with normal Node.js process permissions unless separately sandboxed | Usually has the deepest OS access and the broadest integration surface |
@@ -42,10 +42,10 @@ The current published WasmEdge artifact for this repository is about `2.0 MiB` w
 
 ### Why the WasmEdge route is attractive here
 
-- The published artifact is genuinely small for this repo's current shape: about `2.0 MiB` pulled, with a single-file app payload.
+- The user still gets a single OCI artifact and a short `podman run` / `docker run` command instead of having to know about `wasmedge_quickjs.wasm`, `server.js`, and the module layout.
 - OCI registries give you explicit pull, pin, promote, and rollback mechanics by tag or digest instead of relying on informal install instructions.
 - The delivery model is not locked to JavaScript alone. WasmEdge's docs position it as a runtime for Wasm apps developed in multiple languages, which matters if the app boundary grows beyond a JS-only tool.
-- The sandbox and WASI preopen model make the host access story more explicit than "run a process and let it see the machine."
+- The sandbox and WASI preopen model still make the host access story more explicit than "run a process and let it see the machine," even though the outer delivery unit is now a regular OCI image.
 
 ### Where `npm` / `npx` is still better
 
@@ -62,7 +62,7 @@ The current published WasmEdge artifact for this repository is about `2.0 MiB` w
 ### Critical takeaways
 
 - WasmEdge does not magically remove version-management problems, but OCI registries do give you cleaner and more reproducible deployment units than ad hoc binary sharing or loosely specified install steps.
-- WasmEdge is compelling here because the app is small, browser-based, and easy to describe as a pinned OCI/WASM artifact.
+- WasmEdge is compelling here because the app is browser-based, easy to pin as an OCI artifact, and can be shipped without exposing the internal runtime files to end users.
 - That does not mean it replaces `npm` / `npx` for everyday JS tooling, or native apps for serious desktop integration.
 
 ## Published GHCR Image
@@ -76,11 +76,11 @@ This is the easiest way to try the demo for the first time.
 
 ### Requirements
 
-- Podman installed and ready to run Wasm workloads
+- Podman or Docker installed and ready to run regular Linux OCI containers
 - a writable `demo-data/` directory for the file I/O tab
 - browser access to `http://localhost:8080`
 
-On macOS and Windows, Podman usually means a working `podman machine`. See the [Podman installation guide](https://podman.io/docs/installation) and the [Podman Desktop Wasm guide](https://podman-desktop.io/blog/wasm-workloads-on-macos-and-windows-with-podman).
+On macOS and Windows, Podman usually means a working `podman machine`. See the [Podman installation guide](https://podman.io/docs/installation). All `podman run` examples below also work with `docker run` by replacing the command name.
 
 ### 1. Prepare local data directory
 
@@ -91,7 +91,7 @@ mkdir -p demo-data
 ### 2. Run the published GHCR image with Podman
 
 ```bash
-podman run --rm --platform=wasi/wasm -p 8080:8080 \
+podman run --rm -p 8080:8080 \
   -v "$(pwd)/demo-data:/data" \
   ghcr.io/atjsh/wasmedge-demo:latest
 ```
@@ -122,14 +122,14 @@ The default `MODE=gui` experience is a browser UI with four tabs backed by the s
 
 ### HTTP Demo
 
-- Sends outbound requests from inside the WASM container
+- Sends outbound requests from inside the embedded WasmEdge runtime
 - Supports ad hoc GET, POST, and PUT requests
 - Includes quick example buttons for `httpbin.org`
 - Displays response payloads and simple request timing
 - Try it:
   Use one of the built-in example buttons in the HTTP tab and inspect the returned payload.
-- Known limitation:
-  Outbound hostname-based `fetch()` under Podman Wasm is still under investigation. The same request may work under direct WasmEdge CLI but fail under Podman Wasm with hostname resolution errors.
+- Notes:
+  The container image includes Debian `netbase`, which provides `/etc/services` so hostname-based `http` and `https` fetches work inside the embedded WasmEdge runtime.
 
 ### File I/O Demo
 
@@ -153,9 +153,9 @@ The default `MODE=gui` experience is a browser UI with four tabs backed by the s
 
 The application also supports `MODE=cli`, which skips the HTTP server and runs as a command-line toolkit for the Atlassian Confluence REST API.
 
-### Podman CLI Requirements
+### Container CLI Requirements
 
-- Podman with Wasm support
+- Podman or Docker with normal OCI container support
 - `./demo-data` mounted to `/data`
 - valid Confluence credentials
 
@@ -170,7 +170,7 @@ mkdir -p demo-data
 #### Auth login
 
 ```bash
-podman run --rm --platform=wasi/wasm \
+podman run --rm \
   -v "$(pwd)/demo-data:/data" \
   -e MODE=cli \
   ghcr.io/atjsh/wasmedge-demo:latest \
@@ -183,7 +183,7 @@ podman run --rm --platform=wasi/wasm \
 #### Auth status
 
 ```bash
-podman run --rm --platform=wasi/wasm \
+podman run --rm \
   -v "$(pwd)/demo-data:/data" \
   -e MODE=cli \
   ghcr.io/atjsh/wasmedge-demo:latest \
@@ -193,7 +193,7 @@ podman run --rm --platform=wasi/wasm \
 #### Space list
 
 ```bash
-podman run --rm --platform=wasi/wasm \
+podman run --rm \
   -v "$(pwd)/demo-data:/data" \
   -e MODE=cli \
   -e CONFLUENCE_SITE=mysite.atlassian.net \
@@ -206,7 +206,7 @@ podman run --rm --platform=wasi/wasm \
 #### Page list
 
 ```bash
-podman run --rm --platform=wasi/wasm \
+podman run --rm \
   -v "$(pwd)/demo-data:/data" \
   -e MODE=cli \
   -e CONFLUENCE_SITE=mysite.atlassian.net \
@@ -219,7 +219,7 @@ podman run --rm --platform=wasi/wasm \
 #### Page get
 
 ```bash
-podman run --rm --platform=wasi/wasm \
+podman run --rm \
   -v "$(pwd)/demo-data:/data" \
   -e MODE=cli \
   -e CONFLUENCE_SITE=mysite.atlassian.net \
@@ -232,7 +232,7 @@ podman run --rm --platform=wasi/wasm \
 #### Page create
 
 ```bash
-podman run --rm --platform=wasi/wasm \
+podman run --rm \
   -v "$(pwd)/demo-data:/data" \
   -e MODE=cli \
   -e CONFLUENCE_SITE=mysite.atlassian.net \
@@ -250,7 +250,7 @@ podman run --rm --platform=wasi/wasm \
 #### Page update
 
 ```bash
-podman run --rm --platform=wasi/wasm \
+podman run --rm \
   -v "$(pwd)/demo-data:/data" \
   -e MODE=cli \
   -e CONFLUENCE_SITE=mysite.atlassian.net \
@@ -268,7 +268,7 @@ podman run --rm --platform=wasi/wasm \
 #### Search
 
 ```bash
-podman run --rm --platform=wasi/wasm \
+podman run --rm \
   -v "$(pwd)/demo-data:/data" \
   -e MODE=cli \
   -e CONFLUENCE_SITE=mysite.atlassian.net \
@@ -281,7 +281,7 @@ podman run --rm --platform=wasi/wasm \
 #### Comment list
 
 ```bash
-podman run --rm --platform=wasi/wasm \
+podman run --rm \
   -v "$(pwd)/demo-data:/data" \
   -e MODE=cli \
   -e CONFLUENCE_SITE=mysite.atlassian.net \
@@ -294,7 +294,7 @@ podman run --rm --platform=wasi/wasm \
 #### Comment create
 
 ```bash
-podman run --rm --platform=wasi/wasm \
+podman run --rm \
   -v "$(pwd)/demo-data:/data" \
   -e MODE=cli \
   -e CONFLUENCE_SITE=mysite.atlassian.net \
@@ -310,7 +310,7 @@ podman run --rm --platform=wasi/wasm \
 #### Label list
 
 ```bash
-podman run --rm --platform=wasi/wasm \
+podman run --rm \
   -v "$(pwd)/demo-data:/data" \
   -e MODE=cli \
   -e CONFLUENCE_SITE=mysite.atlassian.net \
@@ -323,7 +323,7 @@ podman run --rm --platform=wasi/wasm \
 #### Label add
 
 ```bash
-podman run --rm --platform=wasi/wasm \
+podman run --rm \
   -v "$(pwd)/demo-data:/data" \
   -e MODE=cli \
   -e CONFLUENCE_SITE=mysite.atlassian.net \
@@ -336,7 +336,7 @@ podman run --rm --platform=wasi/wasm \
 #### Attachment list
 
 ```bash
-podman run --rm --platform=wasi/wasm \
+podman run --rm \
   -v "$(pwd)/demo-data:/data" \
   -e MODE=cli \
   -e CONFLUENCE_SITE=mysite.atlassian.net \
@@ -349,7 +349,7 @@ podman run --rm --platform=wasi/wasm \
 #### Attachment upload
 
 ```bash
-podman run --rm --platform=wasi/wasm \
+podman run --rm \
   -v "$(pwd)/demo-data:/data" \
   -e MODE=cli \
   -e CONFLUENCE_SITE=mysite.atlassian.net \
@@ -362,7 +362,7 @@ podman run --rm --platform=wasi/wasm \
 #### Attachment download
 
 ```bash
-podman run --rm --platform=wasi/wasm \
+podman run --rm \
   -v "$(pwd)/demo-data:/data" \
   -e MODE=cli \
   -e CONFLUENCE_SITE=mysite.atlassian.net \
@@ -375,7 +375,7 @@ podman run --rm --platform=wasi/wasm \
 #### Bulk export
 
 ```bash
-podman run --rm --platform=wasi/wasm \
+podman run --rm \
   -v "$(pwd)/demo-data:/data" \
   -e MODE=cli \
   -e CONFLUENCE_SITE=mysite.atlassian.net \
@@ -388,7 +388,7 @@ podman run --rm --platform=wasi/wasm \
 #### Bulk import
 
 ```bash
-podman run --rm --platform=wasi/wasm \
+podman run --rm \
   -v "$(pwd)/demo-data:/data" \
   -e MODE=cli \
   -e CONFLUENCE_SITE=mysite.atlassian.net \
@@ -453,8 +453,8 @@ ENABLE_AOT=1 IMAGE_NAME=localhost/wasmedge-demo:aot ./scripts/podman-build.sh
 The helper scripts target macOS/Linux shells. On Windows, run the equivalent raw Podman commands instead:
 
 ```bash
-podman build --platform=wasi/wasm -t localhost/wasmedge-demo:latest .
-podman run --rm --platform=wasi/wasm -p 8080:8080 \
+podman build -t localhost/wasmedge-demo:latest .
+podman run --rm -p 8080:8080 \
   -v "<host-demo-data-path>:/data" \
   localhost/wasmedge-demo:latest
 ```
@@ -486,7 +486,7 @@ wasmedge --dir .:. --dir /data:./demo-data --dir /etc/ssl:/etc/ssl:readonly \
 
 ### Filesystem Model
 
-The File I/O tab is intentionally limited to `/data`. When using Podman, `/data` is backed by `./demo-data`. When using the WasmEdge CLI directly, expose the same directory with `--dir /data:./demo-data`.
+The File I/O tab is intentionally limited to `/data`. When using the container image, `/data` is backed by `./demo-data`. When using the WasmEdge CLI directly, expose the same directory with `--dir /data:./demo-data`.
 
 The application does not browse arbitrary host paths. Access is limited to the directories explicitly preopened through WASI.
 
@@ -496,21 +496,19 @@ The application does not browse arbitrary host paths. Access is limited to the d
 Browser (http://localhost:8080)
     |
     v
-server.js
+OCI container
+    |
+    +-- /app/container-entrypoint.sh
+    |
+    v
+wasmedge
     |
     v
 wasmedge_quickjs.wasm
     |
-    +-- inline HTML/CSS/JS
-    +-- /api/runtime
-    +-- /api/fetch
-    +-- /api/files/*
-    +-- /api/server-info
-    |
-    v
-WASI preopens
-    +-- .             (project files inside the runtime)
-    +-- /data         (host-mapped demo-data directory)
+    +-- server.js
+    +-- /modules     (QuickJS modules preopen)
+    +-- /data        (host-mapped demo-data directory)
 ```
 
 ### Building the Image
@@ -522,7 +520,7 @@ WASI preopens
 Equivalent raw command:
 
 ```bash
-podman build --platform=wasi/wasm -t localhost/wasmedge-demo:latest .
+podman build -t localhost/wasmedge-demo:latest .
 ```
 
 The Dockerfile follows a compact multi-stage flow:
@@ -530,7 +528,8 @@ The Dockerfile follows a compact multi-stage flow:
 1. install WasmEdge in the build stage
 2. run `./scripts/sync-wasmedge-quickjs.sh` using the pinned URLs and SHA256 values in `./wasmedge-quickjs.lock`
 3. optionally apply AOT compilation with `wasmedgec` only when `ENABLE_AOT=1`
-4. copy the runtime, `server.js`, `modules/`, and a CA bundle into a `scratch` image
+4. copy the WasmEdge runtime, `server.js`, `modules/`, and a CA bundle into a slim Debian image
+5. install `netbase` so `/etc/services` is available for hostname-based `http` / `https` fetch
 
 This repository does not commit generated runtime assets. The same bootstrap script is used for local WasmEdge CLI setup and for Podman builds.
 
@@ -549,7 +548,7 @@ The repository includes a GitHub Actions workflow at `.github/workflows/publish-
 - Verifies anonymous access to the SHA-tagged manifest from GHCR
 - Promotes `latest` only after verification succeeds
 
-GitHub-hosted Linux runners cannot directly `docker pull` `wasi/wasm` images and report `operating system is not supported`, so the CI check uses anonymous manifest inspection instead of a runtime pull.
+The workflow publishes a regular multi-arch OCI image for `linux/amd64` and `linux/arm64`, then verifies the promoted tags through manifest inspection.
 
 ### Manual fallback publish
 
@@ -566,7 +565,7 @@ echo "$(gh auth token)" | docker login ghcr.io -u atjsh --password-stdin
 
 SHA_TAG="sha-$(git rev-parse --short=12 HEAD)"
 
-docker buildx build --platform wasi/wasm \
+docker buildx build --platform linux/amd64,linux/arm64 \
   -t "ghcr.io/atjsh/wasmedge-demo:${SHA_TAG}" \
   --push .
 

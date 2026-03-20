@@ -21,7 +21,6 @@ ENABLE_AOT="${ENABLE_AOT:-0}"
 # ENABLE_AOT=1 is intended for local same-machine builds only.
 # Published portable images should keep ENABLE_AOT=0.
 exec "${PODMAN_BIN}" build \
-  --platform=wasi/wasm \
   --build-arg "ENABLE_AOT=${ENABLE_AOT}" \
   -t "${IMAGE_NAME}" \
   "${ROOT_DIR}"
